@@ -24,7 +24,11 @@ _DPI = 200
 
 
 def render_citation(record: ParameterRecord) -> Citation:
-    doc = fitz.open(record.doc_id)
+    # Prefer source_path (always a real file path when populated by the
+    # ingest pipeline); fall back to doc_id for direct/unit-test usage where
+    # callers set doc_id == path.
+    path = record.source_path or record.doc_id
+    doc = fitz.open(path)
     try:
         page = doc[record.page - 1]
         rect = fitz.Rect(*record.bbox)

@@ -29,15 +29,35 @@ The canonical MVP scenario is the 60% → 90% phase-revision review: a coordinat
 
 ## 4. Wedge-to-platform path
 
-| Platform feature | What it adds | Why a downstream review team pays for it |
+The reframing: InterLock is not a "document QA tool" or a "PDF chatbot." It is the seed of an **engineering consistency operating system** — a layer that externalizes and scales the cross-document memory that senior reviewers carry in their heads today. The product evolves through five architectural layers; the MVP lives in layers 1, 2, 4 (partial), and 5 (basic). Layers 3 and the expansion of 4 are the platform.
+
+### The five-layer architecture
+
+| # | Layer | What it does | MVP state |
+|---|---|---|---|
+| 1 | **Ingestion** | PDFs (scanned, native, annotated), CAD, sheets, contracts, revisions, markups → text + tables + bboxes + metadata | ✅ PDFs (PyMuPDF + Camelot + vision fallback). CAD/sheets/contracts: platform. |
+| 2 | **Knowledge extraction** | Convert documents into typed claims with engineering ontology, entity resolution, unit normalization | ⚠️ Parameter records with unit normalization + small canonical glossary. **Entity model and ontology expansion are platform.** |
+| 3 | **Project knowledge graph** | Entities (equipment, lines, systems, requirements) + claims about entities + relationships (depends_on, supersedes, derived_from, governed_by, conflicts_with) | ❌ Not in MVP. **This is the heart of the platform.** |
+| 4 | **Discrepancy + risk engine** | Detect conflicts, score material significance, propagate coupled effects (impedance change → fault current → protection coordination invalid), severity tiers | ⚠️ Value-mismatch detection with directional authority and confidence scoring. Material-significance bands, coupled-effect propagation, and cross-claim reasoning are platform. |
+| 5 | **Review workflow** | Triage queue, assignment, severity tiers, comment threads, audit trail, status lifecycle, revision-aware comparison | ⚠️ Single-session Accept/Dismiss with JSON export. Triage/ownership/threading: platform. |
+
+### Wedge-to-platform concrete progression
+
+| Phase | What ships | Why review teams pay for it |
 |---|---|---|
-| Cross-doc semantic alignment (heterogeneous docs) | Spec ↔ study ↔ one-line ↔ panel schedule | Catches inconsistencies invisible inside a single doc |
-| Configurable authority hierarchy | Reviewer declares "data sheet beats study beats one-line" before run | Removes hardcoded assumption; supports diverse project types |
-| Phase-to-phase comparison (30 → 60 → 90 → IFC) | Multi-document review session | Surfaces parameter drift between phases that today only senior eyes catch |
-| Standards-as-authority | IEEE / IEC / NERC compliance pass | Substitutes a slow manual standard cross-reference with automation |
-| Audit log + reviewer e-signature | Regulatory traceability | Mandatory for nuclear / high-voltage / utility filings |
-| DMS integration (SharePoint, Bentley ProjectWise, Autodesk Docs) | Automated ingest on doc check-in | InterLock runs in-line with existing engineering operations |
-| CAD geometry comparison | 2D/3D mismatch detection | Closes the gap with bananaz.ai-style tools; consolidates spend |
+| **Today (MVP)** | Cross-document parameter mismatch detection with directional citations on energy-infrastructure PDFs | Replaces serial human pattern-matching across 60% / 90% submittals; catches AES-anecdote-class decimal errors before construction |
+| **Phase 13 — Entity + Claim graph** | Refactor `ParameterRecord` into `Entity` + `Claim(entity, attribute, value, source)`; pair on (entity, attribute) instead of parameter name | Multi-equipment scenes ("Pump P-101 flowrate" vs "Pump P-102 flowrate"); precondition for everything below |
+| **Phase 14 — Material significance + tolerance bands** | Per-attribute engineering tolerances (transformer impedance ±5% is normal; 10% requires explanation); risk-scored flags | Drops noise rate further; reviewers see *what matters* not *what differs* |
+| **Phase 15 — Revision lineage** | First-class lineage (Rev C supersedes Rev B); supersession-aware authority; parameter-evolution timelines | Real review is rarely 2-doc; it's "the latest revision of every artifact for this asset" |
+| **Phase 16 — Coupled-effect propagation** | Graph traversal: when claim X changes, what derived claims become suspect? | "If transformer impedance changes, recheck the coordination study and the relay settings — both downstream" |
+| **Phase 17 — Standards-as-authority** | IEEE / IEC / NERC code-edition tracking; project-vs-code compliance pass | Eliminates the slowest senior-reviewer task: standards cross-reference |
+| **Phase 18 — Multi-doc review sessions + DMS** | Whole-project corpora; SharePoint/Bentley/Autodesk Docs ingest; triage queue with ownership | InterLock runs in-line with existing engineering operations, not as a side tool |
+| **Phase 19 — CAD geometry layer** | 2D/3D drawing comparison (bananaz.ai-class) integrated with the same claim graph | One consistency engine across drawings + specs, not two siloed tools |
+| **Phase 20 — Continuous engineering assurance** | Always-on consistency monitor across project lifecycle (design → procurement → construction → as-built) | Asset operators pay not for a tool but for traceable assurance across years of project deliverables |
+
+### Why this framing is honest
+
+Most "AI for engineering" products attack drafting, generation, or copilots. Those markets commoditize on model quality. **Review is structurally different**: higher ROI, less regulated, easier to insert without behavior change, and closer to measurable cost savings. The defensibility is not the model — it is the **project knowledge graph**: accumulated entity mappings, discrepancy patterns, review decisions, engineering heuristics, revision histories. That graph compounds with every reviewer interaction. The MVP is the first edge of that graph.
 
 ## 5. Why now
 

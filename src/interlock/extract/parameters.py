@@ -33,6 +33,10 @@ class ParameterRecord:
     raw_value: str
     normalized_magnitude: float | None
     normalized_unit: str | None
+    # Path to the source PDF on disk. Carried alongside doc_id so the
+    # citation renderer can always open the file. Defaults to empty for
+    # back-compat (renderer falls back to doc_id).
+    source_path: str = ""
 
 
 class _Pattern(NamedTuple):
@@ -129,6 +133,7 @@ def extract_parameters(
                         raw_value=raw_value,
                         normalized_magnitude=mag,
                         normalized_unit=unit,
+                        source_path=span.source_path,
                     )
                 )
         # 2) Generic ``Label: number unit`` (spec / data-sheet shape).
@@ -153,6 +158,7 @@ def extract_parameters(
                     raw_value=raw_value,
                     normalized_magnitude=mag,
                     normalized_unit=unit,
+                    source_path=span.source_path,
                 )
             )
     return out

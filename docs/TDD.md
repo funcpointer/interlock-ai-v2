@@ -77,4 +77,44 @@ PDF ─► ingest (PyMuPDF spans + Camelot tables + low-coverage routing)
      ─► UI (Streamlit; accept/dismiss; JSON export of accepted flags)
 ```
 
-11 phase tags in git (`phase-0-scaffold` … `phase-9-deploy`) partition the implementation; each phase ends with a checkpoint commit and a green test suite. Total: ~70 tests across 12 modules.
+Twelve phase tags in git (`phase-0-scaffold` … `phase-11-cross-doc`) plus `v1.0-mvp` and `v1.1-cross-doc` partition the implementation; each phase ends with a checkpoint commit and a green test suite. Total: ~160 tests across ~15 modules including extraction, alignment, detection, citation, eval harness, real-world e2e, edge cases, property tests, canonical glossary, and perf budgets.
+
+---
+
+## 6. Architectural direction — entity-claim graph (platform path)
+
+The MVP intentionally stops at parameter-name-level pairing. The natural next architecture, articulated in `docs/PRD.md` §4 and seeded here for the engineering record, refactors the data model around **entities** and **claims**:
+
+```python
+@dataclass(frozen=True)
+class Entity:
+    id: str            # "P-101"
+    type: str          # "pump" | "transformer" | "line" | "circuit" | ...
+    label: str         # display name
+
+@dataclass(frozen=True)
+class Claim:
+    entity: Entity
+    attribute: str     # "flow_rate" | "impedance_pct" | "primary_voltage" | ...
+    value: str         # raw text, preserved for citation
+    normalized: pint.Quantity | None
+    source: ParameterRecord   # back-pointer to the current citation tuple
+```
+
+Conflict detection becomes group-by-(entity, attribute) and reason over the multi-claim cluster. This unlocks:
+
+- **Multi-equipment fixtures.** "Pump P-101 flowrate = 1200 gpm" vs "Pump P-102 flowrate = 950 gpm" are not a conflict — they're claims about different entities. Today's name-only pairing cannot distinguish.
+- **Entity resolution as a first-class concern.** "P-101", "Pump-101", "Feed Pump A", "Primary Transfer Pump" — all the same entity. The glossary in `align/semantic.py::_CANONICAL` becomes the seed of an entity-resolution table.
+- **Coupled-effect propagation.** Claims can be linked by `derived_from` / `governed_by` edges. Changing the transformer impedance claim invalidates the fault-current claim that was derived from it — the system can flag this without re-reading both documents.
+- **Revision lineage.** Each claim carries its source document's revision; supersession is a first-class relationship.
+
+The current `ParameterRecord` becomes the lowest layer (the cited evidence) under a `Claim`. No data is lost; the pipeline grows a new layer. Phase 13 in `docs/BACKLOG.md`.
+
+**Why this is not in MVP:** the locked fixtures have effectively one transformer (Eaton) or one equipment item (synthetic spec) each. The current architecture is sufficient for them. Refactoring before a multi-equipment fixture exists would be premature optimization that risks the 160-test regression. The trigger to build Phase 13 is Option 4 (a real spec ↔ study pair with multiple named equipment).
+
+## 7. Why these architectural choices
+
+Two principles drive the build, both echoed in the strategic framing that informs the wedge-to-platform path:
+
+- **Findings, not chat.** No conversational interface; every output is a structured `Flag` with full citation tuple. Reviewers triage; the system never asserts wrongness. This positions InterLock as audit infrastructure, not a copilot.
+- **Facts separated from interpretations.** A `Flag` reports *raw values* on both sides plus a *suggested direction* (authority hint). Material significance, risk propagation, and severity tiers are explicitly platform — not because they're hard to add but because adding them prematurely (without tolerance data, without entity resolution, without lineage) would push the system from "verifiable" to "opinion-shaped." Reviewer trust dies the first time the tool is loudly wrong.

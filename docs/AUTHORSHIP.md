@@ -93,6 +93,25 @@ This is disclosed in `docs/FIXTURES.md` §2 and §3, in the eval gold set, and i
 
 **Doc A of the Option 2 fixture pair (`fixtures/pdfs/spec_xfmr_001.pdf`) is also not a real document.** It is a deterministically generated synthetic transformer Equipment Data Sheet, produced by `fixtures/synthesis/generate_spec.py`, shaped to match an IEEE C57.12.00 / ANSI C57.12.10 nameplate spec. Used to demonstrate cross-document semantic alignment between heterogeneous document types when paired with the Eaton coordination study. Disclosed in `docs/FIXTURES.md` §2B. Real-spec curation (using a public manufacturer data sheet) is Option 4 in `docs/BACKLOG.md`.
 
+## Phase 12 — real-world test expansion (after v1.1-cross-doc)
+
+Added 7 test files under `tests/real_world/` and `tests/align/test_canonical.py`. ~50 new test cases across:
+- real-PDF extraction smoke (Eaton/spec/SEL/IEEE)
+- pipeline behaviors (self-compare, unrelated docs, determinism, cross-doc-mode safety)
+- edge cases (empty PDF, single-page, prose-only, part-numbers-only, disjoint-doc, lying-embedder dim-filter)
+- canonical glossary (synonym collapse, family separation, BIL/voltage distinction, no case-fold dupes)
+- citation e2e (PNG signature, audit-tuple completeness, doc_id integrity, authority direction)
+- perf budgets (ingest, extract, Option 1, Option 2 — slow-marked)
+- properties (Pint equivalence/non-equivalence matrix, same_dimension matrix, confidence formula multiplication/clamping/monotonicity, alignment symmetry)
+
+Added two real public PDFs as tracked fixtures:
+- `fixtures/pdfs/real_sel_xfmr_protection.pdf` — SEL 6079 transformer protection
+- `fixtures/pdfs/real_ieee_xfmr_spec_guide.pdf` — IEEE Guide for Preparation of Transformer Specifications
+
+Bug surfaced and fixed in this phase: `render_citation` opened `record.doc_id` as a file path, but pipeline assigned `doc_id` as a logical label. Deployed Streamlit app silently failed citation snippets. Fix: added `source_path` field to `Span` and `ParameterRecord` (populated by `extract_spans` from the actual file path); renderer prefers `source_path` with `doc_id` fallback for back-compat.
+
+Real-world finding: SEL transformer-protection paper is prose-heavy ("the percentage 2 harmonic setting PCT2..."), and current regex extractors miss it. Documented as system limitation; NLP-based extraction lives in `docs/BACKLOG.md`.
+
 ## Phase 11 — cross-doc additions (after v1.0-mvp)
 
 Built after the initial MVP shipped to demonstrate the cross-document wedge that the revision-diff fixture leaves dormant:

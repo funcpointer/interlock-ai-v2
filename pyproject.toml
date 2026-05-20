@@ -37,7 +37,12 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -q"
+# Default: skip slow perf tests in the cumulative regression. Run them
+# explicitly with: uv run pytest -m slow
+addopts = "-ra -q -m 'not slow'"
+markers = [
+  "slow: perf budgets / full-pipeline timings; can spike under cumulative-suite Voyage load. Run via `uv run pytest -m slow`.",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/interlock"]

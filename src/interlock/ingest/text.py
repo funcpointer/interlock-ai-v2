@@ -20,6 +20,11 @@ class Span:
     page: int
     bbox: tuple[float, float, float, float]
     text: str
+    # Path to the source PDF on disk. Separate from doc_id (a logical label)
+    # so the citation renderer can open the file even when callers attach a
+    # non-path identifier (e.g. "doc_a") for display. Defaults to empty for
+    # back-compat with existing tests that construct Span by hand.
+    source_path: str = ""
 
 
 def extract_spans(pdf_path: str, doc_id: str | None = None) -> list[Span]:
@@ -37,7 +42,15 @@ def extract_spans(pdf_path: str, doc_id: str | None = None) -> list[Span]:
                             continue
                         bbox = tuple(span["bbox"])
                         assert len(bbox) == 4
-                        out.append(Span(doc_id=did, page=i, bbox=bbox, text=text))
+                        out.append(
+                            Span(
+                                doc_id=did,
+                                page=i,
+                                bbox=bbox,
+                                text=text,
+                                source_path=pdf_path,
+                            )
+                        )
     finally:
         doc.close()
     return out
@@ -83,4 +96,10 @@ def _merge(line: list[Span]) -> Span:
     ys = [s.bbox[1] for s in ordered] + [s.bbox[3] for s in ordered]
     bbox = (min(xs), min(ys), max(xs), max(ys))
     text = " ".join(s.text for s in ordered)
-    return Span(doc_id=ordered[0].doc_id, page=ordered[0].page, bbox=bbox, text=text)
+    return Span(
+        doc_id=ordered[0].doc_id,
+        page=ordered[0].page,
+        bbox=bbox,
+        text=text,
+        source_path=ordered[0].source_path,
+    )
