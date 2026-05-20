@@ -10,20 +10,22 @@ Bare numbers are treated as dimensionless.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pint
 
-_ureg = pint.UnitRegistry()
+_ureg: Any = pint.UnitRegistry()
 # Pint already understands Ω, μF, kV, MVA, kVA, °C, etc. natively.
 # Only '%' as a 0.01 dimensionless ratio needs adding.
 _ureg.define("percent = 0.01 = %")
 
 
-def parse_quantity(text: str) -> pint.Quantity:
+def parse_quantity(text: str) -> Any:
     cleaned = text.strip().replace(",", "")
     return _ureg.Quantity(cleaned)
 
 
-def normalize_quantity(text: str) -> pint.Quantity:
+def normalize_quantity(text: str) -> Any:
     return parse_quantity(text).to_base_units()
 
 
