@@ -1,0 +1,89 @@
+{
+  "threshold": 0.5,
+  "option_1": {
+    "label": "Option 1 \u2014 revision-diff (60% \u2194 90% Eaton)",
+    "doc_a": "fixtures/pdfs/doc_a_60pct.pdf",
+    "doc_b": "fixtures/pdfs/doc_b_90pct.pdf",
+    "same_page_only": true,
+    "elapsed_s": 7.41,
+    "n_params_a": 52,
+    "n_params_b": 51,
+    "n_pairs_exact": 51,
+    "n_pairs_semantic": 22,
+    "n_pairs_combined": 51,
+    "n_flags_total": 4,
+    "n_flags_above_threshold": 4,
+    "flags_summary": [
+      {
+        "parameter": "Fault Current",
+        "doc_a_value": "20,000 A",
+        "doc_b_value": "200,000 A",
+        "confidence": "1.00",
+        "authoritative_doc_id": "doc_a_60pct"
+      },
+      {
+        "parameter": "%Z",
+        "doc_a_value": "5.75 %",
+        "doc_b_value": "0.575 %",
+        "confidence": "1.00",
+        "authoritative_doc_id": "doc_a_60pct"
+      },
+      {
+        "parameter": "Transformer Rating",
+        "doc_a_value": "1000 kVA",
+        "doc_b_value": "100 kVA",
+        "confidence": "1.00",
+        "authoritative_doc_id": "doc_a_60pct"
+      },
+      {
+        "parameter": "Transformer Rating",
+        "doc_a_value": "1000 kVA",
+        "doc_b_value": "100 kVA",
+        "confidence": "1.00",
+        "authoritative_doc_id": "doc_a_60pct"
+      }
+    ]
+  },
+  "option_2": {
+    "label": "Option 2 \u2014 cross-doc (synthetic spec \u2194 Eaton study)",
+    "doc_a": "fixtures/pdfs/spec_xfmr_001.pdf",
+    "doc_b": "fixtures/pdfs/doc_a_60pct.pdf",
+    "same_page_only": false,
+    "elapsed_s": 4.15,
+    "n_params_a": 7,
+    "n_params_b": 52,
+    "n_pairs_exact": 0,
+    "n_pairs_semantic": 3,
+    "n_pairs_combined": 3,
+    "n_flags_total": 3,
+    "n_flags_above_threshold": 3,
+    "flags_summary": [
+      {
+        "parameter": "Rated Power",
+        "doc_a_value": "1100 kVA",
+        "doc_b_value": "1000 kVA",
+        "confidence": "1.00",
+        "authoritative_doc_id": "spec_xfmr_001"
+      },
+      {
+        "parameter": "Rated Impedance",
+        "doc_a_value": "5.7 %",
+        "doc_b_value": "5.75 %",
+        "confidence": "1.00",
+        "authoritative_doc_id": "spec_xfmr_001"
+      },
+      {
+        "parameter": "Primary Voltage",
+        "doc_a_value": "12.47 kV",
+        "doc_b_value": "13.8 kV",
+        "confidence": "0.90",
+        "authoritative_doc_id": "spec_xfmr_001"
+      }
+    ]
+  },
+  "verdict": {
+    "option_1_flags_via_layout_path": true,
+    "option_2_requires_semantic_alignment": true,
+    "option_2_demonstrates_capability_option_1_cannot": true
+  }
+}

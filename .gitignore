@@ -11,6 +11,7 @@ __pycache__/
 eval/results/*.json
 !eval/results/.gitkeep
 !eval/results/baseline.json
+!eval/results/ab_comparison.json
 .DS_Store
 *.egg-info/
 build/
