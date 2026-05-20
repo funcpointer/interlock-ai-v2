@@ -1,0 +1,63 @@
+# Option 2 gold set — synthetic transformer spec ↔ real Eaton coordination study.
+# Doc A (authoritative): fixtures/pdfs/spec_xfmr_001.pdf
+# Doc B (downstream):    fixtures/pdfs/doc_a_60pct.pdf (Eaton)
+#
+# Exercises the semantic alignment path that revision-diff fixture leaves dormant.
+
+pair:
+  doc_a: fixtures/pdfs/spec_xfmr_001.pdf
+  doc_b: fixtures/pdfs/doc_a_60pct.pdf
+  doc_a_id: spec_xfmr_001
+  doc_b_id: doc_a_60pct
+  mode: cross_doc
+
+flags:
+  - id: TP-CD-1
+    category: parameter_mismatch
+    expected: surfaced
+    min_confidence: 0.5
+    description: "Rated Impedance 5.7% (spec) vs 5.75% Z (Eaton) — decimal-shift parameter mismatch via semantic name alignment."
+    doc_a_value: "5.7 %"
+    doc_b_value_substr: "5.75"
+
+  - id: TP-CD-2
+    category: parameter_mismatch
+    expected: surfaced
+    min_confidence: 0.5
+    description: "Rated Power 1100 kVA (spec) vs 1000 KVA (Eaton) — rating mismatch via semantic name alignment."
+    doc_a_value: "1100 kVA"
+    doc_b_value_substr: "1000"
+
+  - id: TP-CD-3
+    category: parameter_mismatch
+    expected: surfaced
+    min_confidence: 0.5
+    description: "Primary Voltage 12.47 kV (spec) vs 13.8 kV (Eaton) — voltage mismatch via semantic name alignment."
+    doc_a_value: "12.47 kV"
+    doc_b_value_substr: "13.8"
+
+  - id: FP-CD-1
+    category: unit_normalization
+    expected: suppressed
+    max_confidence: 0.5
+    description: "Secondary Voltage 480 V in both — equal values must not be flagged."
+    doc_a_value: "480 V"
+
+  - id: FP-CD-2
+    category: unrelated_param
+    expected: suppressed
+    max_confidence: 0.5
+    description: "Frequency 60 Hz has no Eaton counterpart — must not be flagged."
+    doc_a_value: "60 Hz"
+
+  - id: FP-CD-3
+    category: unrelated_param
+    expected: suppressed
+    max_confidence: 0.5
+    description: "BIL 95 kV has no Eaton counterpart — must not be flagged."
+    doc_a_value: "95 kV"
+
+acceptance:
+  recall_tp_min: 1.0
+  fp_rate_traps_max: 0.0
+  surface_threshold: 0.5  # lower than Option 1's 0.6 because semantic-match confidence is < 1.0 by design.
