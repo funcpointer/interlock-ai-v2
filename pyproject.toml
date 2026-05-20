@@ -1,0 +1,47 @@
+[project]
+name = "interlock"
+version = "0.0.1"
+description = "Cross-document discrepancy detection for engineering PDFs."
+requires-python = ">=3.12"
+dependencies = [
+  "pymupdf>=1.24",
+  "camelot-py[base]>=0.11",
+  "pdfplumber>=0.11",
+  "pint>=0.24",
+  "anthropic>=0.40",
+  "voyageai>=0.3",
+  "streamlit>=1.38",
+  "pydantic>=2.8",
+  "pyyaml>=6.0",
+  "rapidfuzz>=3.9",
+  "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-mock>=3.14",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "types-pyyaml",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/interlock"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
