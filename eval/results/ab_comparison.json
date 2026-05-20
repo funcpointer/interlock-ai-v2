@@ -5,7 +5,7 @@
     "doc_a": "fixtures/pdfs/doc_a_60pct.pdf",
     "doc_b": "fixtures/pdfs/doc_b_90pct.pdf",
     "same_page_only": true,
-    "elapsed_s": 7.41,
+    "elapsed_s": 7.13,
     "n_params_a": 52,
     "n_params_b": 51,
     "n_pairs_exact": 51,
@@ -49,7 +49,7 @@
     "doc_a": "fixtures/pdfs/spec_xfmr_001.pdf",
     "doc_b": "fixtures/pdfs/doc_a_60pct.pdf",
     "same_page_only": false,
-    "elapsed_s": 4.15,
+    "elapsed_s": 3.6,
     "n_params_a": 7,
     "n_params_b": 52,
     "n_pairs_exact": 0,
@@ -67,7 +67,7 @@
       },
       {
         "parameter": "Rated Impedance",
-        "doc_a_value": "5.7 %",
+        "doc_a_value": "4.5 %",
         "doc_b_value": "5.75 %",
         "confidence": "1.00",
         "authoritative_doc_id": "spec_xfmr_001"
