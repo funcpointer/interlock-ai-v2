@@ -1,5 +1,7 @@
-from pathlib import Path
 import hashlib
+from pathlib import Path
+
+from interlock.ingest.pdf import IngestResult, ingest
 
 DOC_A = Path("fixtures/pdfs/doc_a_60pct.pdf")
 DOC_B = Path("fixtures/pdfs/doc_b_90pct.pdf")
@@ -21,3 +23,31 @@ def test_doc_b_derived_and_documented() -> None:
     md = MUTATIONS_MD.read_text()
     for required in ["TP-1", "TP-2", "TP-3", "FP-1", "FP-2", "FN-1"]:
         assert required in md, f"{required} missing from MUTATIONS.md"
+
+
+def test_ingest_returns_spans_tables_and_low_coverage_pages() -> None:
+    result = ingest(str(DOC_A), doc_id="doc_a")
+    assert isinstance(result, IngestResult)
+    assert result.doc_id == "doc_a"
+    assert result.spans, "expected spans"
+    assert isinstance(result.tables, list)
+    assert isinstance(result.low_coverage_pages, list)
+    # Eaton fixture is fully native-text — no page should be flagged as low-coverage.
+    assert result.low_coverage_pages == []
+
+
+def test_ingest_marks_low_coverage_when_a_page_is_empty(tmp_path: Path) -> None:
+    # Create a synthetic 2-page PDF: page 1 has text, page 2 is blank.
+    import fitz
+
+    doc = fitz.open()
+    p1 = doc.new_page()
+    p1.insert_text((72, 72), "hello world this has enough text to exceed the threshold " * 3)
+    doc.new_page()  # blank
+    out = tmp_path / "mixed.pdf"
+    doc.save(str(out))
+    doc.close()
+
+    result = ingest(str(out))
+    assert 2 in result.low_coverage_pages
+    assert 1 not in result.low_coverage_pages
