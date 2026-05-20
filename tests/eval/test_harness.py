@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+from dotenv import load_dotenv
+
+load_dotenv()
 
 GOLD = Path("fixtures/eval/gold.yaml")
 BASELINE = Path("eval/results/baseline.json")
