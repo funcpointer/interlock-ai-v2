@@ -26,12 +26,46 @@ class Table:
     confidence: float
 
 
-def extract_tables(pdf_path: str, pages: str = "all", doc_id: str | None = None) -> list[Table]:
+# Camelot scans every page in `pages="all"`, which on long PDFs (e.g. the IEEE
+# 56-page guide) takes 90-120 s of wall-clock — enough to make Streamlit Cloud
+# feel hung and to time out reviewer patience. We cap the page span by default
+# and let callers override for cases where deep table extraction is needed.
+DEFAULT_MAX_PAGES = 20
+
+
+def _page_spec(pdf_path: str, max_pages: int | None) -> str:
+    if max_pages is None or max_pages <= 0:
+        return "all"
+    import fitz  # local import to avoid top-level cost when not needed
+
+    doc = fitz.open(pdf_path)
+    try:
+        n = len(doc)
+    finally:
+        doc.close()
+    upper = min(n, max_pages)
+    return f"1-{upper}" if upper >= 1 else "1"
+
+
+def extract_tables(
+    pdf_path: str,
+    pages: str | None = None,
+    doc_id: str | None = None,
+    max_pages: int | None = DEFAULT_MAX_PAGES,
+) -> list[Table]:
+    """Extract tables via Camelot.
+
+    Default caps at ``DEFAULT_MAX_PAGES`` (20) so Camelot doesn't scan the
+    whole IEEE 56-page guide on every ingest. Pass an explicit ``pages``
+    string (e.g. ``"1-3,7"``) or ``pages="all"``/``max_pages=None`` to
+    override.
+    """
     did = doc_id or pdf_path
+    page_spec = pages if pages is not None else _page_spec(pdf_path, max_pages)
     out: list[Table] = []
     for flavor in ("lattice", "stream"):
         try:
-            ts = camelot.read_pdf(pdf_path, pages=pages, flavor=flavor)  # type: ignore[attr-defined]
+            ts = camelot.read_pdf(pdf_path, pages=page_spec, flavor=flavor)  # type: ignore[attr-defined]
         except Exception:
             continue
         if len(ts) == 0:

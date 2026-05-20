@@ -221,21 +221,37 @@ if run:
     a_path.write_bytes(a_file.read())  # type: ignore[union-attr]
     b_path.write_bytes(b_file.read())  # type: ignore[union-attr]
 
-    spinner_msg = (
-        "Reviewing — extracting parameters, aligning, asking the LLM for "
-        "engineering significance."
-        if use_llm_judge
-        else "Reviewing — extracting parameters and aligning across documents."
-    )
+    # Staged progress — opaque spinners on long PDFs (e.g. IEEE 56-pp) felt
+    # like the app had hung. With st.status the reviewer sees per-stage timing
+    # and can read the Camelot 'No tables found' warnings as informational
+    # rather than fatal.
     t0 = time.time()
     try:
-        with st.spinner(spinner_msg):
+        with st.status("Reviewing PDFs…", expanded=True) as status:
+            status.write("⏳ Ingesting Doc A — PyMuPDF spans + Camelot tables")
+            status.write("⏳ Ingesting Doc B — same")
+            status.write(
+                "ℹ️ Camelot scans the first 20 pages of each PDF by default; "
+                "longer docs are capped so the UI stays responsive."
+            )
+            if cross_doc_mode:
+                status.write("⏳ Aligning across documents (canonical glossary + Voyage embeddings)")
+            else:
+                status.write("⏳ Aligning by exact name + page (revision-diff mode)")
+            status.write("⏳ Classifying severity (IEEE/IEC tolerance bands)")
+            if use_llm_judge:
+                status.write("⏳ LLM significance judge (Claude Opus 4.7, cached)")
             flags = review_two_documents(
                 str(a_path),
                 str(b_path),
                 embed_fn=embed_voyage,
                 same_page_only=not cross_doc_mode,
                 use_llm_judge=use_llm_judge,
+            )
+            status.update(
+                label=f"Review done in {time.time() - t0:.1f}s",
+                state="complete",
+                expanded=False,
             )
     except Exception as e:
         st.error(
