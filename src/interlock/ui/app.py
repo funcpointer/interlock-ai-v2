@@ -34,7 +34,24 @@ except Exception:  # pragma: no cover
 from interlock.align.embed import embed_voyage  # noqa: E402
 from interlock.cache.cost_ledger import summary as cost_summary  # noqa: E402
 from interlock.citation.render import render_citation  # noqa: E402
+from interlock.extract.parameters import extract_parameters  # noqa: E402
+from interlock.ingest.pdf import ingest  # noqa: E402
 from interlock.pipeline import review_two_documents  # noqa: E402
+
+
+def _diagnostic_counts(pdf_path: str, doc_id: str) -> dict[str, int]:
+    """Per-doc parameter-extraction counts used to explain empty results."""
+    try:
+        result = ingest(pdf_path, doc_id=doc_id)
+        params = extract_parameters(result.spans)
+        return {
+            "spans": len(result.spans),
+            "tables": len(result.tables),
+            "params": len(params),
+            "low_coverage_pages": len(result.low_coverage_pages),
+        }
+    except Exception:  # pragma: no cover
+        return {"spans": 0, "tables": 0, "params": 0, "low_coverage_pages": 0}
 
 
 # ----------------------------------------------------------------------
@@ -270,6 +287,11 @@ if run:
     st.session_state["use_llm_judge_at_run"] = use_llm_judge
     st.session_state["cross_doc_mode_at_run"] = cross_doc_mode
     st.session_state["decisions"] = {}
+    # Always grab per-doc diagnostic counts so the empty-state can explain
+    # *why* no flags surfaced (most often: zero extractable params on one
+    # or both sides of the pair).
+    st.session_state["diag_a"] = _diagnostic_counts(str(a_path), "doc_a")
+    st.session_state["diag_b"] = _diagnostic_counts(str(b_path), "doc_b")
 
 
 # ----------------------------------------------------------------------
@@ -320,11 +342,57 @@ if flags:
     st.caption(f"Mode: {mode_label} · {judge_label}")
 
     if not above and not below:
-        st.info(
-            "No mismatches surfaced. Either the documents agree on every "
-            "extracted parameter, or no parameters were extractable from "
-            "this pair (check the ingest coverage in the source PDFs)."
-        )
+        diag_a = st.session_state.get("diag_a", {})
+        diag_b = st.session_state.get("diag_b", {})
+        st.info("No mismatches surfaced.")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Doc A diagnostics**")
+            st.caption(
+                f"spans: {diag_a.get('spans', 0)} · "
+                f"tables: {diag_a.get('tables', 0)} · "
+                f"**extractable params: {diag_a.get('params', 0)}** · "
+                f"low-coverage pages: {diag_a.get('low_coverage_pages', 0)}"
+            )
+        with col2:
+            st.markdown("**Doc B diagnostics**")
+            st.caption(
+                f"spans: {diag_b.get('spans', 0)} · "
+                f"tables: {diag_b.get('tables', 0)} · "
+                f"**extractable params: {diag_b.get('params', 0)}** · "
+                f"low-coverage pages: {diag_b.get('low_coverage_pages', 0)}"
+            )
+        # Concrete hint based on counts
+        a_p = diag_a.get("params", 0)
+        b_p = diag_b.get("params", 0)
+        if a_p == 0 and b_p == 0:
+            st.warning(
+                "Both documents yielded **zero extractable parameters**. "
+                "Likely causes:\n\n"
+                "- **Prose-heavy technical paper** (e.g. SEL field-case paper): parameter values are described in sentences (\"the harmonic setting PCT2 is …\") rather than tabular layout. Current regex extractors require `Label: value` or domain-specific patterns. Documented as a system limitation in `docs/BACKLOG.md` (prose-embedded parameter extraction).\n"
+                "- **Meta / instructional document** (e.g. IEEE Guide for Preparation of Transformer Specs): the doc teaches how to write a spec rather than being a spec — most numeric values are in examples buried in prose.\n"
+                "- **Scanned PDF**: image-only pages produce zero spans without OCR. Check the `low-coverage pages` count above.\n\n"
+                "Use the demo fixtures `doc_a_60pct.pdf` + `doc_b_90pct.pdf` (revision diff) or `spec_xfmr_001.pdf` + `doc_a_60pct.pdf` (cross-doc) to see the system fire."
+            )
+        elif a_p == 0 or b_p == 0:
+            empty_side = "A" if a_p == 0 else "B"
+            other = "B" if empty_side == "A" else "A"
+            st.warning(
+                f"Doc {empty_side} yielded zero extractable parameters while "
+                f"Doc {other} surfaced {max(a_p, b_p)}. No pairs can form. "
+                "See the empty-side diagnostics above; the most common cause "
+                "is a prose-heavy or meta-guide document."
+            )
+        else:
+            st.info(
+                f"Both documents extracted parameters ({a_p} + {b_p}) but no "
+                "pairs aligned to a value mismatch. Either the named parameters "
+                "don't overlap across the two PDFs, every overlapping value is "
+                "unit-equivalent (Pint-normalized), or every difference is "
+                "below the suppression threshold. Try lowering the threshold "
+                "in the sidebar, or toggle Cross-document mode if the layouts "
+                "differ."
+            )
 
     for f in sorted(above, key=_flag_sort_key):
         fid = _flag_id(f)
