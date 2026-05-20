@@ -64,11 +64,31 @@ _PATTERNS: list[_Pattern] = [
     ),
     # IFLA = NN A
     _Pattern(re.compile(r"IFLA\s*=\s*(\d[\d,]*\.?\d*)\s*A\b"), "IFLA", "A"),
+    # System voltage standalone — Eaton shape "13.8KV" appearing alone on a span.
+    # Anchored to span start to avoid catching values inside ``Label: NN kV``
+    # pairs (those go through the generic pattern instead).
+    _Pattern(
+        re.compile(r"^(\d[\d,]*\.?\d*)\s*(?:kV|KV)\b(?!A)"),
+        "System Voltage",
+        "kV",
+    ),
     # Fuse designations (string-valued)
     _Pattern(re.compile(r"\b(LPN-RK-\d+SP)\b"), "Fuse Designation", None),
     _Pattern(re.compile(r"\b(LPS-RK-\d+SP)\b"), "Fuse Designation", None),
     _Pattern(re.compile(r"\b(KRP-C-\d+SP)\b"), "Fuse Designation", None),
 ]
+
+
+# Generic "Label: number unit" pattern for data-sheet / spec layouts where
+# parameters appear as ``Rated Power: 1100 kVA`` lines. Constrained to a
+# recognized engineering unit suffix so it does not over-fire on prose like
+# ``Notes: 1. TCC1 includes...``.
+_GENERIC_KV = re.compile(
+    r"^(?P<name>[A-Z][A-Za-z][A-Za-z ]{0,40}?)\s*:\s*"
+    r"(?P<num>\d[\d,]*\.?\d*)\s*"
+    r"(?P<unit>kVA|MVA|kV|MV|kA|VA|kHz|MHz|Hz|°C|°F|Ω|μF|%|V|A)"
+    r"(?:\s|$|[^A-Za-z0-9])"
+)
 
 
 def extract_parameters(
@@ -83,6 +103,7 @@ def extract_parameters(
     out: list[ParameterRecord] = []
     section_by_span = section_by_span or {}
     for span in spans:
+        # 1) Domain-specific patterns (Eaton-tuned).
         for pat in _PATTERNS:
             for m in pat.regex.finditer(span.text):
                 token = m.group(1)
@@ -110,4 +131,28 @@ def extract_parameters(
                         normalized_unit=unit,
                     )
                 )
+        # 2) Generic ``Label: number unit`` (spec / data-sheet shape).
+        gm = _GENERIC_KV.match(span.text.strip())
+        if gm:
+            name = gm.group("name").strip()
+            raw_value = f"{gm.group('num')} {gm.group('unit')}"
+            try:
+                q = normalize_quantity(raw_value)
+                mag = float(q.magnitude)
+                unit = str(q.units)
+            except Exception:
+                mag, unit = None, None
+            out.append(
+                ParameterRecord(
+                    doc_id=span.doc_id,
+                    page=span.page,
+                    bbox=span.bbox,
+                    section=section_by_span.get(id(span)),
+                    span_text=span.text,
+                    name=name,
+                    raw_value=raw_value,
+                    normalized_magnitude=mag,
+                    normalized_unit=unit,
+                )
+            )
     return out

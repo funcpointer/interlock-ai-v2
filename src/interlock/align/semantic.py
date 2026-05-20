@@ -15,9 +15,48 @@ from collections.abc import Callable
 
 from interlock.align.exact import AlignedPair
 from interlock.extract.parameters import ParameterRecord
-from interlock.extract.units import equivalent
+from interlock.extract.units import equivalent, same_dimension
 
 EmbedFn = Callable[[list[str]], dict[str, list[float]]]
+
+
+# Engineering-domain canonicalization: collapses shorthand and synonyms to a
+# shared phrase so the embedding model treats them as the same concept.
+# Pure-text alignment alone cannot bridge "%Z" → impedance; this glossary is the
+# explicit engineering knowledge baked into InterLock. Extend per fixture family.
+_CANONICAL: dict[str, str] = {
+    # Impedance family
+    "%Z": "transformer impedance percent",
+    "%z": "transformer impedance percent",
+    "Z%": "transformer impedance percent",
+    "Impedance": "transformer impedance percent",
+    "Rated Impedance": "transformer impedance percent",
+    "Per Unit Impedance": "transformer impedance percent",
+    # Rated power family
+    "Transformer Rating": "transformer rated apparent power kVA",
+    "Rated Power": "transformer rated apparent power kVA",
+    "Rated Capacity": "transformer rated apparent power kVA",
+    "kVA Rating": "transformer rated apparent power kVA",
+    # Voltage families
+    "System Voltage": "system voltage kV",
+    "Primary Voltage": "transformer primary voltage kV",
+    "HV Voltage": "transformer primary voltage kV",
+    "Secondary Voltage": "transformer secondary voltage V",
+    "LV Voltage": "transformer secondary voltage V",
+    # Insulation (conceptually distinct from operating voltage)
+    "BIL": "basic insulation level dielectric withstand",
+    "Basic Insulation Level": "basic insulation level dielectric withstand",
+    # Current
+    "Fault Current": "short circuit fault current",
+    "Short Circuit Current": "short circuit fault current",
+    "IFLA": "full load amperes IFLA",
+    "Full Load Amperes": "full load amperes IFLA",
+}
+
+
+def canonical_name(name: str) -> str:
+    """Map engineering shorthand to a canonical phrase before embedding."""
+    return _CANONICAL.get(name, _CANONICAL.get(name.strip(), name))
 
 
 def _cos(u: list[float], v: list[float]) -> float:
@@ -45,11 +84,14 @@ def align_semantic(
     """
     if not a or not b:
         return []
-    names = list({r.name for r in a} | {r.name for r in b})
-    vecs = embed_fn(names)
+    # Embed canonicalized names so engineering shorthand aligns (%Z → impedance).
+    canon_for: dict[str, str] = {r.name: canonical_name(r.name) for r in a}
+    canon_for.update({r.name: canonical_name(r.name) for r in b})
+    embed_texts = list(set(canon_for.values()))
+    vecs = embed_fn(embed_texts)
     out: list[AlignedPair] = []
     for ra in a:
-        va = vecs.get(ra.name)
+        va = vecs.get(canon_for[ra.name])
         if not va:
             continue
         best_sim = 0.0
@@ -65,7 +107,13 @@ def align_semantic(
                 continue
             if same_page_only and ra.page != rb.page:
                 continue
-            vb = vecs.get(rb.name)
+            # Reject dimensionally incompatible candidates outright
+            # (e.g. "Primary Voltage: 12.47 kV" vs "Fault Current: 20,000 A").
+            # This filter is engineering-domain common sense and dramatically
+            # cuts false alignments without depending on embedding quality.
+            if not same_dimension(ra.raw_value, rb.raw_value):
+                continue
+            vb = vecs.get(canon_for[rb.name])
             if not vb:
                 continue
             sim = _cos(va, vb)
