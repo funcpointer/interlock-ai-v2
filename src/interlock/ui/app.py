@@ -60,7 +60,7 @@ with col_b:
         "Doc B — downstream (e.g., 90% revision)", type="pdf", key="b"
     )
 
-col_t, col_m = st.columns([3, 2])
+col_t, col_m, col_l = st.columns([2, 2, 2])
 with col_t:
     threshold = st.slider(
         "Suppression threshold (flags below this confidence are hidden)",
@@ -78,6 +78,17 @@ with col_m:
             "equipment spec ↔ coordination study). Allows parameters to align "
             "across pages and uses the canonical-name glossary. Leave OFF for "
             "revision-diff comparisons where layout is shared."
+        ),
+    )
+with col_l:
+    use_llm_judge = st.checkbox(
+        "LLM significance judgment",
+        value=False,
+        help=(
+            "Run each flag through an LLM (Claude) that classifies severity "
+            "with engineering reasoning and lists downstream parameters that "
+            "may be affected. Adds ~2s and ~$0.01 per new flag; cached after "
+            "first call. Leave OFF for fast/deterministic rules-only mode."
         ),
     )
 
@@ -102,12 +113,19 @@ if run:
         b_path.write_bytes(b_file.read())  # type: ignore[union-attr]
         t0 = time.time()
         try:
-            with st.spinner("Reviewing... extracting parameters and aligning across documents."):
+            spinner_msg = (
+                "Reviewing... extracting parameters, aligning, and asking the LLM "
+                "for engineering significance."
+                if use_llm_judge
+                else "Reviewing... extracting parameters and aligning across documents."
+            )
+            with st.spinner(spinner_msg):
                 flags = review_two_documents(
                     str(a_path),
                     str(b_path),
                     embed_fn=embed_voyage,
                     same_page_only=not cross_doc_mode,
+                    use_llm_judge=use_llm_judge,
                 )
         except Exception as e:
             st.error(f"Review failed: {e}")
@@ -123,15 +141,41 @@ if run:
     st.session_state["b_path"] = str(b_path)
     st.session_state["decisions"] = {}
 
+_SEVERITY_EMOJI = {"critical": "🔴", "major": "🟠", "minor": "🟡", "info": "⚪"}
+_SEVERITY_ORDER = {"critical": 0, "major": 1, "minor": 2, "info": 3}
+
+
+def _flag_sort_key(f) -> tuple[int, float]:  # type: ignore[no-untyped-def]
+    sev = getattr(f, "severity", "major")
+    return (_SEVERITY_ORDER.get(sev, 1), -f.confidence)
+
+
 flags = st.session_state.get("flags", [])
 if flags:
     above = [f for f in flags if f.confidence >= threshold]
     below = [f for f in flags if f.confidence < threshold]
 
+    # Severity counts for the header
+    sev_counts: dict[str, int] = {}
+    for f in above:
+        sev = getattr(f, "severity", "major")
+        sev_counts[sev] = sev_counts.get(sev, 0) + 1
+    header_breakdown = " · ".join(
+        f"{_SEVERITY_EMOJI.get(s, '⚫')} {sev_counts[s]} {s}"
+        for s in ("critical", "major", "minor", "info")
+        if sev_counts.get(s, 0) > 0
+    )
     st.subheader(f"{len(above)} flag(s) above confidence ≥ {threshold:.2f}")
-    for f in sorted(above, key=lambda x: -x.confidence):
+    if header_breakdown:
+        st.caption(header_breakdown)
+
+    for f in sorted(above, key=_flag_sort_key):
         fid = _flag_id(f)
         verdict = st.session_state["decisions"].get(fid, {}).get("verdict")
+        sev = getattr(f, "severity", "major")
+        sev_icon = _SEVERITY_EMOJI.get(sev, "⚫")
+        deviation = getattr(f, "deviation_pct", 0.0)
+        dev_str = f" · Δ{deviation:.1f}%" if deviation else ""
         badge = ""
         if verdict == "accepted":
             badge = "  ✅ Accepted"
@@ -139,8 +183,9 @@ if flags:
             badge = "  ✖️ Dismissed"
 
         with st.expander(
-            f"[{f.confidence:.2f}] {f.parameter} · {f.rationale}{badge}",
-            expanded=verdict is None,
+            f"{sev_icon} [{sev.upper()}{dev_str}] [{f.confidence:.2f}] "
+            f"{f.parameter} · {f.rationale}{badge}",
+            expanded=verdict is None and sev in {"critical", "major"},
         ):
             st.caption(f"Authority rule: {f.authority_rule}")
             cit_a = None
