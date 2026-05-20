@@ -1,1 +1,2 @@
 2ca0aad9a834dea1201f82f830e25a8f69348f0ae43ce6846b0cac27526c6948  fixtures/pdfs/doc_a_60pct.pdf
+e2f7a9bf4e7aec02f9781fee408c1ae34dd15fe0ce3e194d5a81c6ceff90c2df  fixtures/pdfs/doc_b_90pct.pdf
