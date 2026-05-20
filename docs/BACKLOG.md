@@ -14,4 +14,4 @@ Anything that surfaces during MVP execution and would expand scope goes here. Th
 
 ## Discovered during execution
 
-(Append entries with date, source phase, and one-line description.)
+- 2026-05-20 (P2): Camelot detects chart axes (50-row × 38-col grids) on Eaton coordination-curve pages, not the device-ID tables. The device-ID "tables" are visually-laid-out paragraphs, not bordered tables. For this fixture, parameter extraction is span-driven; the table-cell extractor in the plan (Tasks 3.3b/3.3c) was skipped. Platform-path: real engineering specs with native PDF tables (transformer data sheets, equipment schedules) will exercise this.
