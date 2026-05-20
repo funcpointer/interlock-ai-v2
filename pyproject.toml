@@ -38,6 +38,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra -q"
+markers = [
+  "slow: tests with multi-second runtime (perf budgets, full-pipeline)",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/interlock"]
