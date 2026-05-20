@@ -1,0 +1,1 @@
+2ca0aad9a834dea1201f82f830e25a8f69348f0ae43ce6846b0cac27526c6948  fixtures/pdfs/doc_a_60pct.pdf
