@@ -25,12 +25,19 @@ def review_two_documents(
     embed_fn: EmbedFn,
     doc_a_id: str = "doc_a",
     doc_b_id: str = "doc_b",
+    same_page_only: bool = True,
 ) -> list[Flag]:
+    """Run end-to-end review.
+
+    ``same_page_only=True`` (default) suits revision-diff fixtures where the two
+    documents share layout. Set ``False`` for cross-document pairs (e.g. spec ↔
+    coordination study) where the same parameter appears on different pages.
+    """
     ia = ingest(pdf_a, doc_id=doc_a_id)
     ib = ingest(pdf_b, doc_id=doc_b_id)
     pa = extract_parameters(ia.spans)
     pb = extract_parameters(ib.spans)
     exact = align_exact(pa, pb)
-    semantic = align_semantic(pa, pb, embed_fn=embed_fn)
+    semantic = align_semantic(pa, pb, embed_fn=embed_fn, same_page_only=same_page_only)
     combined = combine_alignments(exact, semantic)
     return detect_flags(combined)

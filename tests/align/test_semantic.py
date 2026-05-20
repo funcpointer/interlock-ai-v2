@@ -13,11 +13,13 @@ def _p(name: str, doc: str) -> ParameterRecord:
 
 
 def test_semantic_uses_provided_embedder() -> None:
-    a = [_p("Impedance", "A")]
-    b = [_p("%Z", "B")]
+    # Use names NOT in the canonical glossary so the embed_fn is called with
+    # the raw names. (Glossary names get remapped to canonical phrases.)
+    a = [_p("AlphaParam", "A")]
+    b = [_p("BetaParam", "B")]
 
     def fake_embed(texts: list[str]) -> dict[str, list[float]]:
-        return {"Impedance": [1.0, 0.0], "%Z": [0.99, 0.01]}
+        return {"AlphaParam": [1.0, 0.0], "BetaParam": [0.99, 0.01]}
 
     pairs = align_semantic(a, b, embed_fn=fake_embed, threshold=0.9)
     assert len(pairs) == 1
@@ -25,26 +27,26 @@ def test_semantic_uses_provided_embedder() -> None:
 
 
 def test_semantic_below_threshold_does_not_emit_pair() -> None:
-    a = [_p("Impedance", "A")]
-    b = [_p("Voltage", "B")]
+    a = [_p("AlphaParam", "A")]
+    b = [_p("GammaParam", "B")]
 
     def fake_embed(texts: list[str]) -> dict[str, list[float]]:
-        return {"Impedance": [1.0, 0.0], "Voltage": [0.0, 1.0]}
+        return {"AlphaParam": [1.0, 0.0], "GammaParam": [0.0, 1.0]}
 
     pairs = align_semantic(a, b, embed_fn=fake_embed, threshold=0.5)
     assert pairs == []
 
 
 def test_semantic_picks_best_match_when_multiple_candidates() -> None:
-    a = [_p("Impedance", "A")]
-    b = [_p("Voltage", "B"), _p("%Z", "B")]
+    a = [_p("AlphaParam", "A")]
+    b = [_p("GammaParam", "B"), _p("BetaParam", "B")]
 
     def fake_embed(texts: list[str]) -> dict[str, list[float]]:
-        return {"Impedance": [1.0, 0.0], "%Z": [0.99, 0.01], "Voltage": [0.0, 1.0]}
+        return {"AlphaParam": [1.0, 0.0], "BetaParam": [0.99, 0.01], "GammaParam": [0.0, 1.0]}
 
     pairs = align_semantic(a, b, embed_fn=fake_embed, threshold=0.5)
     assert len(pairs) == 1
-    assert pairs[0].b.name == "%Z"
+    assert pairs[0].b.name == "BetaParam"
 
 
 def test_semantic_returns_empty_on_no_a_records() -> None:

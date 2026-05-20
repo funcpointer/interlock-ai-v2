@@ -16,3 +16,13 @@ eval/results/*.json
 build/
 dist/
 fixtures/pdfs/_*.pdf
+# Competition source materials (do not publish):
+interlock-ai.txt
+interlock-ai-discussion-points.txt
+research-findings.md
+# Original-named candidate PDFs (kept locally for re-runs, not tracked):
+fixtures/pdfs/6079_TransformerProtection_Web.pdf
+fixtures/pdfs/Preparation-of-Transformer-Specifications1.pdf
+fixtures/pdfs/bus-ele-sample-coordination-study.pdf
+# Repo-root CLAUDE.md (project-internal AI context):
+/CLAUDE.md
