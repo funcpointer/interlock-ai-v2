@@ -22,6 +22,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from interlock.extract.entities import Claim, Entity, EntityType
 from interlock.extract.parameters import ParameterRecord
@@ -188,7 +189,7 @@ def claim_count() -> int:
     return int(row[0])
 
 
-def _row_to_claim(row: tuple[object, ...]) -> Claim:
+def _row_to_claim(row: tuple[Any, ...]) -> Claim:
     (
         _id,
         entity_id,
@@ -210,28 +211,32 @@ def _row_to_claim(row: tuple[object, ...]) -> Claim:
         ent_type,
         ent_label,
     ) = row
-    entity = Entity(id=entity_id, type=_coerce_entity_type(ent_type), label=ent_label)
+    entity = Entity(
+        id=cast(str, entity_id),
+        type=_coerce_entity_type(cast(str, ent_type)),
+        label=cast(str, ent_label),
+    )
     record = ParameterRecord(
-        doc_id=doc_id,
+        doc_id=cast(str, doc_id),
         page=int(page),
         bbox=(float(bx0), float(by0), float(bx1), float(by1)),
-        section=section,
-        span_text=span_text,
-        name=attribute,
-        raw_value=raw_value,
-        normalized_magnitude=normalized_magnitude,
-        normalized_unit=normalized_unit,
-        source_path=source_path,
+        section=cast("str | None", section),
+        span_text=cast(str, span_text),
+        name=cast(str, attribute),
+        raw_value=cast(str, raw_value),
+        normalized_magnitude=cast("float | None", normalized_magnitude),
+        normalized_unit=cast("str | None", normalized_unit),
+        source_path=cast(str, source_path),
     )
     return Claim(
         entity=entity,
-        attribute=attribute,
-        raw_value=raw_value,
+        attribute=cast(str, attribute),
+        raw_value=cast(str, raw_value),
         source_record=record,
     )
 
 
-def _claims_select(where_sql: str, params: tuple[object, ...]) -> list[Claim]:
+def _claims_select(where_sql: str, params: tuple[Any, ...]) -> list[Claim]:
     conn = _connect()
     try:
         rows = conn.execute(
