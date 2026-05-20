@@ -57,6 +57,26 @@ End on the README's "Phase tags" block to communicate: this is methodical, TDD, 
 
 ---
 
+## Optional second segment — cross-doc demo (Option 2)
+
+If video budget allows another 60 seconds, follow Option 1 with the cross-doc fixture to demonstrate the semantic-alignment path:
+
+> "Same pipeline, different fixture. Now Doc A is an equipment data sheet — a transformer nameplate spec. Doc B is the coordination study. Different document types, different layouts, different parameter naming."
+
+Action: toggle **Cross-document mode** in the UI. Upload `spec_xfmr_001.pdf` and `doc_a_60pct.pdf`.
+
+> "Three flags surface. The spec says `Rated Power: 1100 kVA`; the study references `1000 kVA`. The spec says `Rated Impedance: 5.7 %`; the study references `5.75 %Z`. InterLock's canonical glossary maps `%Z` to impedance, `Rated Power` to transformer rating, and the embedding alignment carries the rest. Adobe Acrobat can't do this. This is the cross-document wedge."
+
+Show the A/B JSON briefly:
+
+```
+uv run python scripts/run_ab.py
+```
+
+> "A/B comparison: Option 1 surfaces flags via layout-anchored exact matching. Option 2 surfaces flags via semantic alignment. Both correct, both cited, both directional."
+
+---
+
 ## Pre-recording checklist
 
 - [ ] `.env` has both `VOYAGE_API_KEY` and `ANTHROPIC_API_KEY` populated.

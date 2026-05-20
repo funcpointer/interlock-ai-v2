@@ -26,11 +26,28 @@ uv run streamlit run src/interlock/ui/app.py
 
 ## Demo
 
-Upload the two fixture PDFs in `fixtures/pdfs/`:
+Two fixture pairs ship with the repo.
+
+### Option 1 — revision-diff (60% baseline ↔ 90% revision)
+
 - `doc_a_60pct.pdf` — Doc A (authoritative, real Eaton sample coordination study)
 - `doc_b_90pct.pdf` — Doc B (downstream, derived from Doc A with 6 documented mutations — see `fixtures/mutations/MUTATIONS.md`)
 
-Expected output: 4 flags surfaced at confidence 1.0 (TP-1 impedance, TP-2 fault current, TP-3 transformer rating × 2 sites). Zero false positives. The FP-1 unit-equivalent trap (`150 kVA` vs `0.15 MVA`) is correctly suppressed by Pint-based normalization.
+Cross-document mode **off**. Expected: 4 flags surfaced at confidence 1.0 (TP-1 impedance, TP-2 fault current, TP-3 transformer rating × 2 sites). Zero false positives. FP-1 unit-equivalent trap (`150 kVA` vs `0.15 MVA`) suppressed by Pint normalization.
+
+### Option 2 — cross-document (equipment spec ↔ coordination study)
+
+- `spec_xfmr_001.pdf` — Doc A (authoritative, synthetic transformer Equipment Data Sheet; see `docs/AUTHORSHIP.md` for disclosure)
+- `doc_a_60pct.pdf` — Doc B (downstream, the same Eaton study reused)
+
+Cross-document mode **on**. Expected: 3 flags surfaced via semantic alignment + canonical glossary — Rated Power ↔ Transformer Rating, Rated Impedance ↔ %Z, Primary Voltage ↔ System Voltage. Zero exact-name matches in this pair; the semantic path carries the entire signal.
+
+A/B comparison verifies Option 2 demonstrates a capability Option 1 cannot:
+
+```bash
+uv run python scripts/run_ab.py
+cat eval/results/ab_comparison.json
+```
 
 ## Evaluation
 

@@ -45,6 +45,48 @@ The IEEE Guide for Preparation of Transformer Specifications was considered as a
 
 ---
 
+## 2B. Option 2 — cross-doc fixture pair (added 2026-05-20)
+
+A second fixture pair built to exercise the cross-document semantic alignment path that Option 1's revision-diff fixture leaves dormant.
+
+### Spec — `fixtures/pdfs/spec_xfmr_001.pdf`
+
+- **Role:** Authoritative (equipment data sheet supersedes downstream studies per `CLAUDE.md` authority hierarchy)
+- **Source:** **Synthetic** — generated deterministically by `fixtures/synthesis/generate_spec.py`. One page, IEEE C57.12.00 nameplate-style layout.
+- **Disclosure:** disclosed in `docs/AUTHORSHIP.md`. Real-spec curation is Option 4 (BACKLOG).
+- **Provenance:** SHA-256 in `fixtures/pdfs/HASHES.txt`.
+
+### Study — `fixtures/pdfs/doc_a_60pct.pdf`
+
+The same Eaton coordination study used as Doc A in Option 1, here reused as the downstream document. Unmodified.
+
+### Gold set — `fixtures/eval/gold_cross_doc.yaml`
+
+6 labeled cases:
+| ID | Expected | Tests |
+|---|---|---|
+| TP-CD-1 | surfaced ≥ 0.5 | Rated Impedance 5.7 % vs %Z 5.75 % (semantic-aligned via canonical glossary) |
+| TP-CD-2 | surfaced ≥ 0.5 | Rated Power 1100 kVA vs Transformer Rating 1000 kVA |
+| TP-CD-3 | surfaced ≥ 0.5 | Primary Voltage 12.47 kV vs System Voltage 13.8 kV |
+| FP-CD-1 | suppressed | Secondary Voltage 480 V — equal in both, no flag |
+| FP-CD-2 | suppressed | Frequency 60 Hz — no counterpart, no flag |
+| FP-CD-3 | suppressed | BIL 95 kV — no counterpart, dim-distinct from system voltage, no flag |
+
+### Authority rule for this pair
+
+Doc A (spec) authoritative for transformer physical parameters; Doc B (study) is the downstream reference. Hardcoded in `detect/authority.py` for MVP; configurable in platform path.
+
+### A/B verification
+
+`scripts/run_ab.py` runs the same pipeline against both pairs and asserts:
+- Option 1 produces flags via layout-anchored exact matching (`n_pairs_exact > 0`, all flags exact-derived).
+- Option 2 requires semantic alignment (`n_pairs_exact == 0`, all 3 flags semantic-derived).
+- Option 2 demonstrates a capability Option 1 cannot — cross-document flag surfacing.
+
+Result file: `eval/results/ab_comparison.json`.
+
+---
+
 ## 3. Mutation policy
 
 Mutations to Doc B are governed by these rules. Any mutation that violates them must not be added to the fixture.

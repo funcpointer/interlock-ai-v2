@@ -89,4 +89,21 @@ The Eaton sample coordination study (`fixtures/pdfs/doc_a_60pct.pdf`) is a real 
 - 2 false-positive traps (unit-equivalent value rewrite; heading-only rephrase)
 - 1 false-negative checklist gap (parameter removal)
 
-This is disclosed in `docs/FIXTURES.md` §2 and §3, in the eval gold set, and is intentional: the brief required two real PDFs ingested, and the fixture pair demonstrates the system's behavior on a controlled, labeled, reproducible test case. The same pipeline runs unchanged on genuinely independent document pairs; that broader case is what the BACKLOG calls out as Option 2 / Option 4 expansion.
+This is disclosed in `docs/FIXTURES.md` §2 and §3, in the eval gold set, and is intentional: the brief required two real PDFs ingested, and the fixture pair demonstrates the system's behavior on a controlled, labeled, reproducible test case.
+
+**Doc A of the Option 2 fixture pair (`fixtures/pdfs/spec_xfmr_001.pdf`) is also not a real document.** It is a deterministically generated synthetic transformer Equipment Data Sheet, produced by `fixtures/synthesis/generate_spec.py`, shaped to match an IEEE C57.12.00 / ANSI C57.12.10 nameplate spec. Used to demonstrate cross-document semantic alignment between heterogeneous document types when paired with the Eaton coordination study. Disclosed in `docs/FIXTURES.md` §2B. Real-spec curation (using a public manufacturer data sheet) is Option 4 in `docs/BACKLOG.md`.
+
+## Phase 11 — cross-doc additions (after v1.0-mvp)
+
+Built after the initial MVP shipped to demonstrate the cross-document wedge that the revision-diff fixture leaves dormant:
+
+- `fixtures/synthesis/generate_spec.py` — synthetic transformer spec generator.
+- `fixtures/eval/gold_cross_doc.yaml` — Option 2 gold set.
+- `scripts/run_ab.py` — A/B comparison harness producing `eval/results/ab_comparison.json`.
+- `src/interlock/align/semantic.py` — `_CANONICAL` engineering-shorthand glossary (`%Z` → impedance, `Rated Power` → transformer rated apparent power, `BIL` → basic insulation level, etc.); `same_dimension` filter rejecting voltage↔current false pairs.
+- `src/interlock/extract/parameters.py` — generic `Label: number unit` pattern for data-sheet layouts; `System Voltage` standalone pattern anchored to span start.
+- `src/interlock/extract/units.py` — `same_dimension(a, b)` helper.
+- `src/interlock/pipeline.py` — `same_page_only` parameter plumbed through.
+- `src/interlock/ui/app.py` — "Cross-document mode" checkbox.
+- `tests/eval/test_harness_cross_doc.py` — Option 2 gold-set acceptance test.
+- `docs/superpowers/plans/2026-05-20-cross-doc-option2.md` — phase-11 plan.
