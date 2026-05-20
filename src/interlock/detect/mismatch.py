@@ -1,7 +1,19 @@
 """Emit directional flags from aligned pairs.
 
 A Flag declares which doc is authoritative for the parameter family and which
-is deviating, with citations on both sides and an assembled confidence.
+is deviating, with citations on both sides, an assembled confidence, and an
+engineering-tolerance-aware severity tier.
+
+Severity classification (Phase 13)
+----------------------------------
+For numeric mismatches we compute the relative deviation between the two
+magnitudes and bucket against tolerance bands per attribute family
+(``detect/tolerances.py``). The ``info`` tier is suppressed by default —
+those changes are within typical tolerance and don't merit reviewer time.
+
+String-valued mismatches (part-number changes) classify as ``major`` by
+default since they're not amenable to numeric tolerance reasoning but are
+real engineering changes that need a reviewer's eye.
 """
 
 from __future__ import annotations
@@ -11,6 +23,8 @@ from dataclasses import dataclass
 from interlock.align.exact import AlignedPair
 from interlock.detect.authority import authority_for
 from interlock.detect.confidence import flag_confidence
+from interlock.detect.family import attribute_family_for_param_name
+from interlock.detect.tolerances import Severity, classify, relative_deviation
 from interlock.extract.parameters import ParameterRecord
 
 
@@ -24,9 +38,22 @@ class Flag:
     confidence: float
     rationale: str
     authority_rule: str
+    severity: Severity = "major"  # default for back-compat with hand-built tests
+    deviation_pct: float = 0.0
+    attribute_family: str | None = None
 
 
-def detect_flags(pairs: list[AlignedPair]) -> list[Flag]:
+def detect_flags(
+    pairs: list[AlignedPair],
+    *,
+    suppress_info: bool = True,
+) -> list[Flag]:
+    """Convert aligned pairs into directional flags with severity tiers.
+
+    ``suppress_info=True`` (default) drops within-tolerance changes from the
+    output entirely — they don't merit reviewer attention. Set ``False`` to
+    return every classified flag (useful for the suppressed-pane UI).
+    """
     out: list[Flag] = []
     for p in pairs:
         if p.value_equivalent:
@@ -39,6 +66,29 @@ def detect_flags(pairs: list[AlignedPair]) -> list[Flag]:
             and p.a.normalized_magnitude == p.b.normalized_magnitude
         ):
             continue
+
+        # Classify severity via tolerance bands when both sides are numeric;
+        # otherwise treat string-only mismatches as 'major' (a part-number
+        # change is engineering-meaningful by construction).
+        family = attribute_family_for_param_name(p.a.name)
+        if (
+            p.a.normalized_magnitude is not None
+            and p.b.normalized_magnitude is not None
+            and family is not None
+        ):
+            dev = relative_deviation(p.a.normalized_magnitude, p.b.normalized_magnitude)
+            severity = classify(family, dev)
+        elif p.a.normalized_magnitude is not None and p.b.normalized_magnitude is not None:
+            # Numeric but unknown family — fall back to default bands.
+            dev = relative_deviation(p.a.normalized_magnitude, p.b.normalized_magnitude)
+            severity = classify("_default_unknown", dev)
+        else:
+            dev = 0.0
+            severity = "major"
+
+        if suppress_info and severity == "info":
+            continue
+
         decision = authority_for(p.a.doc_id, p.b.doc_id, p.a.name)
         conf = flag_confidence(
             extraction=1.0,
@@ -58,6 +108,9 @@ def detect_flags(pairs: list[AlignedPair]) -> list[Flag]:
                     f"≠ {p.b.raw_value} (deviation, p{p.b.page})"
                 ),
                 authority_rule=decision.rule,
+                severity=severity,
+                deviation_pct=dev,
+                attribute_family=family,
             )
         )
     return out

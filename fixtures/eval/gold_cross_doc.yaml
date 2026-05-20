@@ -16,8 +16,8 @@ flags:
     category: parameter_mismatch
     expected: surfaced
     min_confidence: 0.5
-    description: "Rated Impedance 5.7% (spec) vs 5.75% Z (Eaton) — decimal-shift parameter mismatch via semantic name alignment."
-    doc_a_value: "5.7 %"
+    description: "Rated Impedance 4.5% (spec) vs 5.75% Z (Eaton) — out-of-tolerance impedance mismatch via semantic name alignment. Updated 2026-05-21 from 5.7% (within ±7.5% IEEE C57.12.00 tolerance, correctly suppressed by Phase 13 severity classification)."
+    doc_a_value: "4.5 %"
     doc_b_value_substr: "5.75"
 
   - id: TP-CD-2
