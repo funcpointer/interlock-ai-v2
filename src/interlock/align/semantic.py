@@ -34,7 +34,15 @@ def align_semantic(
     b: list[ParameterRecord],
     embed_fn: EmbedFn,
     threshold: float = 0.85,
+    same_page_only: bool = True,
 ) -> list[AlignedPair]:
+    """Pair unmatched A records to B records by name-embedding similarity.
+
+    ``same_page_only`` (default True): restrict candidates to the same page as
+    A. Prevents nonsensical cross-page pairing (e.g., a removed fuse on p7 of A
+    matching an unrelated fuse on p2 of B). Disable only for cross-document
+    workflows where layout is not shared.
+    """
     if not a or not b:
         return []
     names = list({r.name for r in a} | {r.name for r in b})
@@ -46,9 +54,16 @@ def align_semantic(
             continue
         best_sim = 0.0
         best_rb: ParameterRecord | None = None
+        # Skip string-valued records entirely from semantic matching:
+        # part numbers / designations need exact name+value match, not
+        # embedding similarity (which conflates LPN-RK-500SP with LPS-RK-225SP).
+        if ra.normalized_magnitude is None:
+            continue
         for rb in b:
-            # Only pair records of compatible value-type: both numeric or both string.
-            if (ra.normalized_magnitude is None) != (rb.normalized_magnitude is None):
+            # Only pair records of compatible value-type: both numeric.
+            if rb.normalized_magnitude is None:
+                continue
+            if same_page_only and ra.page != rb.page:
                 continue
             vb = vecs.get(rb.name)
             if not vb:

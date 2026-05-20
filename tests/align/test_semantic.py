@@ -3,10 +3,12 @@ from interlock.extract.parameters import ParameterRecord
 
 
 def _p(name: str, doc: str) -> ParameterRecord:
+    # Use numeric magnitudes so semantic alignment considers these records
+    # (string-valued records are skipped to avoid part-number confusion).
     return ParameterRecord(
         doc_id=doc, page=1, bbox=(0, 0, 100, 10), section=None,
-        span_text=name, name=name, raw_value="x",
-        normalized_magnitude=None, normalized_unit=None,
+        span_text=name, name=name, raw_value="1 V",
+        normalized_magnitude=1.0, normalized_unit="volt",
     )
 
 
