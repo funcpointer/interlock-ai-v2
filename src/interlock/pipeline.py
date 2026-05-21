@@ -25,6 +25,10 @@ from interlock.ingest.pdf import ingest
 from interlock.store import sqlite as store
 
 EmbedFn = Callable[[list[str]], dict[str, list[float]]]
+# (stage_id, state) where state is "start" or "done". stage_id values are
+# stable strings the UI maps to human labels — adding new stages requires
+# UI awareness but never breaks callers that ignore unknown ids.
+StageCallback = Callable[[str, str], None]
 
 if TYPE_CHECKING:
     from interlock.ingest.pdf import OcrProgressCallback
@@ -45,6 +49,7 @@ def review_two_documents(
     table_max_pages: int | None = None,
     enable_vision_ocr: bool = False,
     ocr_progress_cb: OcrProgressCallback | None = None,
+    stage_cb: StageCallback | None = None,
 ) -> list[Flag]:
     """Run end-to-end review.
 
@@ -71,11 +76,22 @@ def review_two_documents(
 
     ``persist_claims=True`` writes claims and entities to the SQLite store
     for audit/triage. Off by default since the demo loop doesn't need it.
+
+    ``stage_cb`` (optional) fires before/after each major pipeline phase
+    so a UI can render per-stage progress instead of a static checklist.
+    Emitted ids in order: ``ingest_a``, ``ingest_b``, ``extract``,
+    ``align``, ``detect``, ``judge`` (only when ``use_llm_judge=True``
+    and at least one flag survived detection).
     """
     def _cb_a(done: int, total: int, page: int) -> None:
         if ocr_progress_cb is not None:
             ocr_progress_cb(done, total, page)
 
+    def _stage(name: str, state: str) -> None:
+        if stage_cb is not None:
+            stage_cb(name, state)
+
+    _stage("ingest_a", "start")
     ia = ingest(
         pdf_a,
         doc_id=doc_a_id,
@@ -83,6 +99,9 @@ def review_two_documents(
         enable_vision_ocr=enable_vision_ocr,
         ocr_progress_cb=_cb_a,
     )
+    _stage("ingest_a", "done")
+
+    _stage("ingest_b", "start")
     ib = ingest(
         pdf_b,
         doc_id=doc_b_id,
@@ -90,9 +109,14 @@ def review_two_documents(
         enable_vision_ocr=enable_vision_ocr,
         ocr_progress_cb=_cb_a,
     )
+    _stage("ingest_b", "done")
+
+    _stage("extract", "start")
     pa = extract_parameters(ia.spans)
     pb = extract_parameters(ib.spans)
+    _stage("extract", "done")
 
+    _stage("align", "start")
     if use_claim_layer:
         ca = claims_from_records(pa)
         cb = claims_from_records(pb)
@@ -105,7 +129,14 @@ def review_two_documents(
 
     semantic = align_semantic(pa, pb, embed_fn=embed_fn, same_page_only=same_page_only)
     combined = combine_alignments(exact, semantic)
+    _stage("align", "done")
+
+    _stage("detect", "start")
     flags = detect_flags(combined, suppress_info=suppress_info)
+    _stage("detect", "done")
+
     if use_llm_judge and flags:
+        _stage("judge", "start")
         flags = [apply_judgment_to_flag(f, judge(f)) for f in flags]
+        _stage("judge", "done")
     return flags

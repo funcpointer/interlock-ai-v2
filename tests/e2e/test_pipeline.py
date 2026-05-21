@@ -39,3 +39,26 @@ def test_pipeline_emits_directional_flags() -> None:
         assert f.b_record.page >= 1
         assert f.a_record.span_text
         assert f.b_record.span_text
+
+
+def test_pipeline_stage_cb_fires_in_order() -> None:
+    """UI relies on stage_cb to drive per-stage progress placeholders.
+
+    Each stage must fire (start, then done) and the overall sequence of
+    starts must match the declared pipeline order — otherwise the
+    placeholders flicker out of order or some never resolve.
+    """
+    calls: list[tuple[str, str]] = []
+    review_two_documents(
+        DOC_A,
+        DOC_B,
+        embed_fn=_trivial_embedder,
+        use_llm_judge=False,
+        stage_cb=lambda sid, state: calls.append((sid, state)),
+    )
+    starts = [sid for (sid, state) in calls if state == "start"]
+    dones = [sid for (sid, state) in calls if state == "done"]
+    assert starts == ["ingest_a", "ingest_b", "extract", "align", "detect"]
+    assert dones == starts, "every started stage must also complete"
+    # No "judge" stage when use_llm_judge=False.
+    assert "judge" not in starts

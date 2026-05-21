@@ -325,39 +325,72 @@ if run:
     a_path.write_bytes(a_file.read())  # type: ignore[union-attr]
     b_path.write_bytes(b_file.read())  # type: ignore[union-attr]
 
+    # Each stage gets its own placeholder so the row's icon/elapsed time
+    # can update independently as the pipeline progresses. Without per-row
+    # placeholders, st.status writes accumulate top-to-bottom and you can
+    # only ever see "running" or "done" for the whole block, not each step.
+    _STAGE_LABELS: dict[str, str] = {
+        "ingest_a": "Ingesting Doc A (PyMuPDF spans + Camelot tables)",
+        "ingest_b": "Ingesting Doc B (PyMuPDF spans + Camelot tables)",
+        "extract": "Extracting parameters (regex patterns + Pint unit normalisation)",
+        "align": "Aligning across documents (exact name + canonical glossary + Voyage embeddings)",
+        "detect": "Detecting mismatches + classifying severity (IEEE / IEC tolerance bands)",
+        "judge": "LLM significance judgement (Claude, cached per flag)",
+    }
+    _STAGE_ORDER: list[str] = ["ingest_a", "ingest_b", "extract", "align", "detect"]
+    if use_llm_judge:
+        _STAGE_ORDER.append("judge")
+
     t0 = time.time()
     try:
         with st.status("Reviewing PDFs…", expanded=True) as status:
-            status.write("⏳ Ingesting Doc A (PyMuPDF spans + Camelot tables)")
-            status.write("⏳ Ingesting Doc B (same)")
             status.write(
-                f"ℹ️ Camelot is scanning the first {table_max_pages} pages of each "
-                "PDF; adjust the slider in the sidebar to expand the scope."
+                f"ℹ️ Camelot scans the first {table_max_pages} pages per PDF. "
+                "Adjust via the sidebar slider if relevant tables sit deeper."
             )
-            status.write(
-                "⏳ Aligning across documents (exact name + canonical glossary + "
-                "Voyage embeddings + Pint unit normalisation)"
-            )
+            stage_placeholders: dict[str, Any] = {
+                sid: status.empty() for sid in _STAGE_ORDER
+            }
+            for sid in _STAGE_ORDER:
+                stage_placeholders[sid].markdown(f"⏸️ {_STAGE_LABELS[sid]}")
+
+            stage_starts: dict[str, float] = {}
             ocr_bar_holder: dict[str, Any] = {}
-            if enable_vision_ocr:
-                status.write(
-                    "⏳ Vision OCR on low-coverage pages (Claude Sonnet 4.5, parallel × 5, cached)"
-                )
-                ocr_bar_holder["bar"] = st.progress(0.0, text="OCR: waiting for first page…")
+
+            def _stage_cb(stage_id: str, state: str) -> None:
+                ph = stage_placeholders.get(stage_id)
+                if ph is None:
+                    return
+                label = _STAGE_LABELS[stage_id]
+                if state == "start":
+                    stage_starts[stage_id] = time.time()
+                    ph.markdown(f"⏳ **{label}…**")
+                elif state == "done":
+                    dt = time.time() - stage_starts.get(stage_id, time.time())
+                    ph.markdown(f"✅ {label} · {dt:.1f}s")
 
             def _ocr_cb(done: int, total: int, page: int) -> None:
-                bar = ocr_bar_holder.get("bar")
-                if bar is None:
-                    return
+                # Lazy-create OCR row + bar so it never appears when no
+                # low-coverage pages need vision fallback.
+                if "bar" not in ocr_bar_holder:
+                    ocr_bar_holder["label"] = status.empty()
+                    ocr_bar_holder["label"].markdown(
+                        "⏳ **Vision OCR on low-coverage pages "
+                        "(Claude Sonnet 4.5, parallel × 5, cached)**"
+                    )
+                    ocr_bar_holder["bar"] = st.progress(0.0, text="OCR: starting…")
+                    ocr_bar_holder["start"] = time.time()
                 ratio = done / max(total, 1)
-                bar.progress(
+                ocr_bar_holder["bar"].progress(
                     min(ratio, 1.0),
                     text=f"OCR: {done}/{total} pages complete (last: page {page})",
                 )
+                if done >= total:
+                    dt = time.time() - ocr_bar_holder["start"]
+                    ocr_bar_holder["label"].markdown(
+                        f"✅ Vision OCR on low-coverage pages · {total} page(s) · {dt:.1f}s"
+                    )
 
-            status.write("⏳ Classifying severity against IEEE / IEC tolerance bands")
-            if use_llm_judge:
-                status.write("⏳ Asking the LLM for engineering rationale (cached)")
             flags = review_two_documents(
                 str(a_path),
                 str(b_path),
@@ -367,6 +400,7 @@ if run:
                 table_max_pages=table_max_pages,
                 enable_vision_ocr=enable_vision_ocr,
                 ocr_progress_cb=_ocr_cb if enable_vision_ocr else None,
+                stage_cb=_stage_cb,
             )
             status.update(
                 label=f"Review complete in {time.time() - t0:.1f}s",
