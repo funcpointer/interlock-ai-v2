@@ -2,11 +2,12 @@ from interlock.align.exact import AlignedPair, align_exact
 from interlock.extract.parameters import ParameterRecord
 
 
-def _p(name, doc, raw, mag=None, unit=None, page=1, y=0.0) -> ParameterRecord:
+def _p(name, doc, raw, mag=None, unit=None, page=1, y=0.0, entity_tag="") -> ParameterRecord:
     return ParameterRecord(
         doc_id=doc, page=page, bbox=(0, y, 100, y + 10), section=None,
         span_text=f"{name}: {raw}", name=name, raw_value=raw,
         normalized_magnitude=mag, normalized_unit=unit,
+        entity_tag=entity_tag,
     )
 
 
@@ -176,6 +177,58 @@ def test_ocr_degeneracy_applies_to_numeric_multi_instance() -> None:
     paired = {(p.a.raw_value, p.b.raw_value) for p in pairs}
     assert ("150 kVA", "150 kVA") in paired
     assert ("1000 kVA", "100 kVA") not in paired
+
+
+# ---------- Entity-tag (Device ID) pairing ----------
+
+
+def test_entity_tag_takes_priority_over_position() -> None:
+    """Even with positional anchors that would suggest one pairing,
+    matching Device IDs must override. Doc A row 6 pairs with Doc B
+    row 6, regardless of where it appears on the page."""
+    a = [
+        _p("Fuse Designation", "A", "KRP-C-1600SP", page=5, y=100, entity_tag="6"),
+        _p("Fuse Designation", "A", "LPS-RK-200SP", page=5, y=300, entity_tag="21"),
+    ]
+    b = [
+        _p("Fuse Designation", "B", "LPS-RK-200SP", page=5, y=100, entity_tag="21"),
+        _p("Fuse Designation", "B", "KRP-C-1600SP", page=5, y=300, entity_tag="6"),
+    ]
+    pairs = align_exact(a, b)
+    paired = {(p.a.entity_tag, p.b.entity_tag, p.a.raw_value, p.b.raw_value) for p in pairs}
+    # Tagged pairs match by tag, not by y-proximity.
+    assert ("6", "6", "KRP-C-1600SP", "KRP-C-1600SP") in paired
+    assert ("21", "21", "LPS-RK-200SP", "LPS-RK-200SP") in paired
+
+
+def test_entity_tag_mismatch_drops_pair_entirely() -> None:
+    """User's actual failure mode: Doc A has row ⑥ (KRP-C-1600SP),
+    Doc B has row 21 (LPS-RK-100SP). Different Device IDs → not the
+    same physical device → no pair, no false flag."""
+    a = [_p("Fuse Designation", "A", "KRP-C-1600SP", page=5, y=100, entity_tag="6")]
+    b = [_p("Fuse Designation", "B", "LPS-RK-100SP", page=5, y=100, entity_tag="21")]
+    pairs = align_exact(a, b)
+    assert pairs == []
+
+
+def test_tagged_and_untagged_records_never_cross_pair() -> None:
+    """A tagged Doc A record must not pair with an untagged Doc B
+    record (the tagged side has identity, the untagged side doesn't —
+    can't claim correspondence)."""
+    a = [_p("Fuse Designation", "A", "KRP-C-1600SP", page=5, y=100, entity_tag="6")]
+    b = [_p("Fuse Designation", "B", "KRP-C-1600SP", page=5, y=100, entity_tag="")]
+    pairs = align_exact(a, b)
+    assert pairs == []
+
+
+def test_untagged_records_still_pair_when_both_lack_tags() -> None:
+    """Back-compat: pages with no Device IDs still pair via existing
+    positional/family/value gates."""
+    a = [_p("%Z", "A", "5.75 %", mag=0.0575, page=3, y=100)]
+    b = [_p("%Z", "B", "0.575 %", mag=0.00575, page=3, y=100)]
+    pairs = align_exact(a, b)
+    assert len(pairs) == 1
+    assert pairs[0].value_equivalent is False
 
 
 def test_native_distinct_y_pairing_unaffected_by_degeneracy_gate() -> None:

@@ -101,6 +101,19 @@ def align_exact(
         same_page = [rb for rb in candidates if rb.page == ra.page and id(rb) not in used_b]
         if not same_page:
             continue
+        # Entity-tag gate (highest priority). When the extractor captured a
+        # leading Device ID on this row, only pair with the same Device ID
+        # on the other side. Records without a tag never pair with tagged
+        # records — that cross-pair is exactly the failure mode where
+        # "⑥ KRP-C" gets matched against "21 LPS-RK" because the algorithm
+        # had no identity signal beyond name. If no same-tag candidate
+        # exists, the record goes unpaired (no false flag).
+        if ra.entity_tag:
+            same_page = [rb for rb in same_page if rb.entity_tag == ra.entity_tag]
+        else:
+            same_page = [rb for rb in same_page if not rb.entity_tag]
+        if not same_page:
+            continue
         # String-valued (no normalized_magnitude): require same family prefix
         # so KRP-C never pairs with LPS-RK. Position is still used to choose
         # among same-family candidates.

@@ -72,3 +72,70 @@ def test_extract_fuse_designation_as_string_value() -> None:
     assert target[0].raw_value == "LPN-RK-500SP"
     # No numeric normalization for part numbers.
     assert target[0].normalized_magnitude is None
+
+
+# ---------- Entity-tag capture (Device ID at start of line) ----------
+
+
+def test_entity_tag_captures_circled_digit() -> None:
+    """Circled digits (①-⑳) at the start of a table row are normalised
+    to ASCII so a Device ID painted as ⑥ in Doc A pairs with 6 in Doc B."""
+    spans = [_s("⑥ KRP-C-1600SP Class L Fuse")]
+    records = extract_parameters(spans)
+    target = [r for r in records if r.name == "Fuse Designation"]
+    assert target
+    assert target[0].entity_tag == "6"
+
+
+def test_entity_tag_captures_numeric_row_prefix() -> None:
+    spans = [_s("21 LPS-RK-100SP Class RK1 Fuse")]
+    records = extract_parameters(spans)
+    target = [r for r in records if r.name == "Fuse Designation"]
+    assert target
+    assert target[0].entity_tag == "21"
+
+
+def test_entity_tag_captures_numbered_list_prefix() -> None:
+    spans = [_s("3. KRP-C-1200SP")]
+    records = extract_parameters(spans)
+    target = [r for r in records if r.name == "Fuse Designation"]
+    assert target
+    assert target[0].entity_tag == "3"
+
+
+def test_entity_tag_strips_table_pipe_separator() -> None:
+    """OCR-derived table rows look like ``⑥ | KRP-C-1600SP | Class L``
+    after v2 prompt. The pipe separator must not block the tag detector."""
+    spans = [_s("⑥ | KRP-C-1600SP | Class L Fuse")]
+    records = extract_parameters(spans)
+    target = [r for r in records if r.name == "Fuse Designation"]
+    assert target
+    assert target[0].entity_tag == "6"
+
+
+def test_entity_tag_empty_when_no_leading_marker() -> None:
+    spans = [_s("KRP-C-1600SP")]
+    records = extract_parameters(spans)
+    target = [r for r in records if r.name == "Fuse Designation"]
+    assert target
+    assert target[0].entity_tag == ""
+
+
+def test_entity_tag_does_not_misfire_on_value_starting_with_digit() -> None:
+    """``5.75%Z, liquid`` starts with a digit. That digit is the value,
+    not a Device ID. The leading-marker regex requires whitespace after
+    the marker, so this must NOT capture ``5`` as the tag."""
+    spans = [_s("5.75%Z, liquid")]
+    records = extract_parameters(spans)
+    target = [r for r in records if r.name == "%Z"]
+    assert target
+    assert target[0].entity_tag == ""
+
+
+def test_entity_tag_inherited_by_all_records_from_one_span() -> None:
+    """A single tagged span line emitting multiple parameters
+    (rare but possible) — all records inherit the row's tag."""
+    spans = [_s("⑩ 1000KVA XFMR Inrush 5.75%Z")]
+    records = extract_parameters(spans)
+    assert records
+    assert all(r.entity_tag == "10" for r in records)

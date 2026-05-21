@@ -37,6 +37,14 @@ class ParameterRecord:
     # citation renderer can always open the file. Defaults to empty for
     # back-compat (renderer falls back to doc_id).
     source_path: str = ""
+    # Leading Device ID / row marker scraped from the start of the source
+    # line (e.g. "⑥" in "⑥ | KRP-C-1600SP | Class L"). When present this
+    # ties the record to a specific table row / device, giving alignment
+    # a real identity to pair on instead of guessing by position. Empty
+    # string when no marker was detected. Normalised to ASCII (circled
+    # digits → "1".."20"; uppercase otherwise) so "⑥" in Doc A matches
+    # "6." in Doc B.
+    entity_tag: str = ""
 
 
 class _Pattern(NamedTuple):
@@ -95,6 +103,50 @@ _GENERIC_KV = re.compile(
 )
 
 
+# Leading Device ID / row-marker detector. Matches the FIRST token on a
+# line when it looks like a table-row identifier:
+#   - Circled digits ① - ⑳ (U+2460-U+2473) and ㉑ - ㉟ (U+3251-U+325F)
+#   - Numbered list / row prefix: "1", "1.", "1)", "21", "21."
+#   - Equipment-style code: "A1", "F2", "T-200" (uppercase letter then
+#     1-3 digits, optional hyphen)
+# The regex requires the marker to be followed by whitespace then a
+# recognised engineering token start, so prose like "1. TCC1 includes…"
+# (where the digit is part of a sentence) is *not* captured as an entity.
+_LEADING_DEVICE_ID = re.compile(
+    r"^[\s|]*"
+    r"("
+        r"[①-⑳]"               # ① - ⑳
+        r"|[㉑-㉟]"              # ㉑ - ㉟
+        r"|\d{1,3}[.)]?"                 # 1, 1., 1), 21, 21.
+        r"|[A-Z][\-]?\d{1,3}"            # A1, F2, T-200
+    r")"
+    r"\s+"
+)
+
+# Map circled digit → ASCII so "⑥" in Doc A matches "6" in Doc B.
+_CIRCLED_DIGIT_MAP: dict[str, str] = {
+    chr(0x2460 + i): str(i + 1) for i in range(20)  # ① - ⑳
+}
+_CIRCLED_DIGIT_MAP.update({chr(0x3251 + i): str(21 + i) for i in range(15)})  # ㉑ - ㉟
+
+
+def _normalize_entity_tag(raw_tag: str) -> str:
+    """Canonical form of a Device ID so cross-doc matches survive
+    glyph variations: ``⑥``, ``6``, ``6.``, ``6)`` all collapse to ``6``."""
+    t = raw_tag.strip().rstrip(".)").upper()
+    return _CIRCLED_DIGIT_MAP.get(t, t)
+
+
+def _detect_entity_tag(span_text: str) -> str:
+    """Return the normalised Device ID at the start of ``span_text``, or
+    empty string if no row marker is present. Operates on per-line spans
+    (native PyMuPDF line aggregation or per-line OCR splits)."""
+    m = _LEADING_DEVICE_ID.match(span_text)
+    if not m:
+        return ""
+    return _normalize_entity_tag(m.group(1))
+
+
 def extract_parameters(
     spans: list[Span],
     section_by_span: dict[int, str | None] | None = None,
@@ -107,6 +159,10 @@ def extract_parameters(
     out: list[ParameterRecord] = []
     section_by_span = section_by_span or {}
     for span in spans:
+        # Detect the row's Device ID once per span; every parameter
+        # extracted from this line inherits it. Empty string when the
+        # line doesn't start with a recognised marker.
+        entity_tag = _detect_entity_tag(span.text)
         # 1) Domain-specific patterns (Eaton-tuned).
         for pat in _PATTERNS:
             for m in pat.regex.finditer(span.text):
@@ -134,6 +190,7 @@ def extract_parameters(
                         normalized_magnitude=mag,
                         normalized_unit=unit,
                         source_path=span.source_path,
+                        entity_tag=entity_tag,
                     )
                 )
         # 2) Generic ``Label: number unit`` (spec / data-sheet shape).
@@ -159,6 +216,7 @@ def extract_parameters(
                     normalized_magnitude=mag,
                     normalized_unit=unit,
                     source_path=span.source_path,
+                    entity_tag=entity_tag,
                 )
             )
     return out
