@@ -2,6 +2,8 @@
 
 Cross-document discrepancy detection for engineering PDFs. Reviewer uploads two PDFs from the same project; the system surfaces directional, cited, **severity-tiered** parameter mismatches with **identity-aware pairing**, **pairing-confidence scoring**, an **honest unpaired-records surface**, and optional LLM significance judgment.
 
+**Live demo:** https://interlock-ai-re8mb948inkerzmkn5zpgv.streamlit.app/ (Streamlit Cloud free tier — first visit may take ~30 s for cold start)
+
 - PRD: [`docs/PRD.md`](docs/PRD.md) — reviewer persona, wedge, 5-layer platform path
 - TDD: [`docs/TDD.md`](docs/TDD.md) — architecture, tolerance bands, evaluation, known limits
 - Architecture diagrams: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — control flow, data flow, cache hierarchy
@@ -88,7 +90,7 @@ Gold set: `fixtures/eval/gold.yaml`. Acceptance thresholds locked in `docs/FIXTU
 | Asset | Where | How a reviewer accesses it |
 |---|---|---|
 | Source code | https://github.com/funcpointer/interlock-ai | Public read. Phase tags + `v1.*` checkpoints provide point-in-time snapshots. |
-| Deployed prototype | Streamlit Cloud URL (add when live) | Public read. Cold start ~30 s on first visit (free tier). |
+| Deployed prototype | https://interlock-ai-re8mb948inkerzmkn5zpgv.streamlit.app/ | Public read. Cold start ~30 s on first visit (Streamlit Cloud free tier). |
 | Demo video | (URL added after recording) | Public read. |
 | Fixture PDFs | `fixtures/pdfs/` in the repo | Tracked in git. Real Eaton document is a public sample; synthetic fixtures disclosed in `docs/AUTHORSHIP.md`. |
 | Evaluation gold sets | `fixtures/eval/gold*.yaml` | Tracked in git. Acceptance thresholds in `docs/FIXTURES.md` §6. |

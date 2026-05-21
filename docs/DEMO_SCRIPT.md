@@ -113,8 +113,10 @@ Visual: expand one flag, point at the LLM-generated rationale paragraph.
 
 ## Pre-recording checklist
 
-- [ ] `.env` populated: `VOYAGE_API_KEY`, `ANTHROPIC_API_KEY`.
-- [ ] `uv run streamlit run src/interlock/ui/app.py` opens without errors.
+- [ ] Decide: record against local `streamlit run` or the **deployed URL** https://interlock-ai-re8mb948inkerzmkn5zpgv.streamlit.app/ ? Deployed is more honest (shows reviewers what they'll see); local is faster and avoids cold-start risk.
+- [ ] If deployed: pre-warm the URL 10 minutes before recording so the first interactive click is fast.
+- [ ] `.env` populated: `VOYAGE_API_KEY`, `ANTHROPIC_API_KEY` (local runs only — deployed instance has them server-side).
+- [ ] `uv run streamlit run src/interlock/ui/app.py` opens without errors (fallback path if cloud flakes).
 - [ ] All four demo PDFs accessible from the desktop:
   - `fixtures/pdfs/doc_a_60pct.pdf`
   - `fixtures/pdfs/doc_b_90pct.pdf`
