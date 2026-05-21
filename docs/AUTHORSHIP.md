@@ -93,6 +93,21 @@ This is disclosed in `docs/FIXTURES.md` §2 and §3, in the eval gold set, and i
 
 **Doc A of the Option 2 fixture pair (`fixtures/pdfs/spec_xfmr_001.pdf`) is also not a real document.** It is a deterministically generated synthetic transformer Equipment Data Sheet, produced by `fixtures/synthesis/generate_spec.py`, shaped to match an IEEE C57.12.00 / ANSI C57.12.10 nameplate spec. Used to demonstrate cross-document semantic alignment between heterogeneous document types when paired with the Eaton coordination study. Disclosed in `docs/FIXTURES.md` §2B. Real-spec curation (using a public manufacturer data sheet) is Option 4 in `docs/BACKLOG.md`.
 
+## Phase 19 — Identity-first alignment + honest gap surface (after v1.5-mvp-ready)
+
+Four-commit refactor responding to user-reported false flags on the OCR-vs-native fuse-table case. Cross-family fuse pairs (KRP-C-1600SP vs LPS-RK-100SP) and cross-position transformer pairs (150 kVA vs 100 kVA on multi-instance pages) were surfacing because alignment had no notion of *which* fuse / *which* transformer a record described — it pairred by parameter name + page + y-proximity, and y-proximity collapsed under OCR (every vision-derived span shares the whole-page bbox).
+
+Each commit individually tested + tagged on `v1.5-mvp-ready`:
+
+- **Commit 1 — entity-tag capture.** `ParameterRecord.entity_tag` field; extractor reads leading row markers from each span (circled digits ①-㉟, "21", "21.", "A1", "T-200") and normalises to ASCII. `align_exact` filters candidates by entity-tag agreement before any positional rule. Records without a tag never cross-pair with tagged records. 11 new tests.
+- **Commit 2 — unpaired surface.** `ReviewResult` dataclass + `review_two_documents_full()`; UI "📋 Unpaired records" expander shows records the aligner declined to pair. Converts silent gaps into reviewer-visible tasks. Legacy `review_two_documents()` preserved as a thin shim (20+ call sites untouched). 2 new tests.
+- **Commit 3 — pairing confidence.** `pairing_confidence` per pairing rule (1.0 tag-match / 0.9 single-instance / 0.75 multi-instance-distinct-y / 0.5 value-equality-fallback). Surfaced on every `Flag`; folded into overall confidence; weak pairs (<0.75) get a `⚠️ weak pair` badge and are collapsed by default. Also refactored y-degeneracy detection to use the unconsumed candidate pool so the gate stays consistent across iterations within one bucket. 1 new test + 16 existing align tests pass.
+- **Commit 4 — OCR prompt v3.** Explicit "preserve Device IDs as the FIRST token of each row; do NOT guess one" directive. `PROMPT_VERSION` bumped v2 → v3 for cache invalidation. Regression test asserts the prompt mentions Device IDs and the ① glyph.
+
+253 tests pass (deselected: live-API).
+
+**Honest scope statement.** The architecture pieces (entity_tag field, ambiguity gates, pairing_confidence, unpaired surface) generalise across document classes. Several specific heuristics — `_LEADING_DEVICE_ID` regex, `_string_family` regex, the OCR prompt's Device-ID examples — are shaped to fuse-coordination tables and will need broadening for HVAC schedules / process P&IDs / spec sheets with right-aligned ID columns. Full table of "what generalises vs what's overfit", untested document classes, and the ranked generalisation plan are in `docs/TDD.md` § "Known limits (Phase 19 honesty disclosure)".
+
 ## Phase 14 — Entity + Claim layer (after v1.3-tolerance)
 
 Additive layer above `ParameterRecord` so the pipeline can distinguish equipment within a single document. Phase 14 ships the infrastructure; multi-equipment demo activation is deferred to platform path (entity fingerprinting against implicit-side docs is required for cross-doc multi-equipment scenes — Phase 14b in BACKLOG).

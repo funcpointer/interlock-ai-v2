@@ -99,6 +99,39 @@ Five layers (Ingestion, Knowledge extraction, Persistence, Discrepancy + signifi
 | PDF parse failure | Exception in `ingest` | Surface to UI with per-doc diagnostic counts (spans / tables / extractable params / low-coverage pages) explaining why no flags surfaced |
 | Empty result on otherwise valid PDFs | Surfaced via the diagnostic-counts panel | Concrete branches for both-zero, one-zero, both-nonzero-no-pairs, each with a named likely cause |
 
+## Known limits (Phase 19 honesty disclosure)
+
+The current alignment is correct and conservative for the documents we tested against (Eaton fuse coordination study + mutated revision + OCR derivative). The architecture generalises; several specific heuristics do not. Reviewers and future engineers deserve to know exactly where.
+
+**Architecture pieces that generalise across domains:**
+- `ParameterRecord.entity_tag` as a first-class identity field
+- Ambiguity gates (count mismatch, OCR y-degeneracy) — structural, not domain-specific
+- `pairing_confidence` per pairing rule and the `⚠️ weak pair` UI badge
+- Unpaired-records surface — right answer regardless of pipeline
+
+**Heuristics that are overfit to fuse-coordination-style documents:**
+
+| Component | What it handles well | Where it breaks |
+|---|---|---|
+| `_LEADING_DEVICE_ID` regex | Circled digits ①-㉟, "21.", "A1", "T-200" | Misses `XFMR-001` (prefix too long), `P-101A`, `T200` (no hyphen), bullets / brackets `(1)` / `[1]`, Roman numerals, IDs not in column 1 |
+| `_string_family` regex | Bussmann part numbers (KRP-C, LPS-RK, LPN-RK) | `#6 AWG` (no alpha prefix), `XHHW-2` (over-broad family), `T-1000-A` (collapses to "T") |
+| OCR v3 prompt's Device-ID directive | Numbered/circled-digit table rows | Schedules where IDs sit in rightmost column or below the value; sidebar callouts; equipment named in prose |
+| Asymmetric "tagged never pairs with untagged" rule | Both docs cleanly tagged, or both cleanly untagged | One side tagged + other side OCR-stripped → everything goes to unpaired, no flags surface |
+| `pairing_confidence` values (1.0 / 0.9 / 0.75 / 0.5) | Order is defensible; coarse score for UI gating | Spacing is opinion, not calibrated against ground truth |
+
+**Untested document classes** (no fixtures, no gold flags):
+- HVAC equipment schedules (`AHU-1`, `FCU-5`)
+- Process P&ID with instrument tags (`PV-1`, `FT-1`, `LIC-100`)
+- Pipe / cable schedules
+- Spec sheets / BOMs with right-aligned ID columns
+- Documents containing no Device IDs at all — current behaviour falls back to positional/family heuristics, which were the very rules Phase 19 was trying to back off of. We don't know how many real engineering docs that describes.
+
+**Generalisation plan** (post-MVP, ranked by leverage):
+1. Pluggable entity-tag detector — register multiple regex banks per doc class, keyed off ingest-time classification
+2. Camelot-row binding — every parameter in row R of a Camelot-extracted table inherits row-R identity, even without a leading marker
+3. Diverse fixture suite — HVAC schedule, P&ID, BOM-style spec; gold flags on each
+4. Calibration of `pairing_confidence` magnitudes against labelled ground truth
+
 ## Open questions + future work
 
 - **Entity fingerprinting** (Phase 14b): binding an implicit equipment in one doc to a tagged equipment on the other via attribute fingerprint. Required for cross-doc multi-equipment demos.
