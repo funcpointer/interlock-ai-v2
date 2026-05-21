@@ -32,17 +32,54 @@ except Exception:  # pragma: no cover
     pass
 
 from interlock.align.embed import embed_voyage  # noqa: E402
-from interlock.cache.cost_ledger import summary as cost_summary  # noqa: E402
 from interlock.citation.render import render_citation  # noqa: E402
 from interlock.extract.parameters import extract_parameters  # noqa: E402
 from interlock.ingest.pdf import ingest  # noqa: E402
 from interlock.pipeline import review_two_documents  # noqa: E402
 
 
-def _diagnostic_counts(pdf_path: str, doc_id: str) -> dict[str, int]:
-    """Per-doc parameter-extraction counts used to explain empty results."""
+# ----------------------------------------------------------------------
+# Page config + theme
+# ----------------------------------------------------------------------
+
+st.set_page_config(
+    page_title="InterLock AI — Review",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+_SEVERITY = {
+    "critical": {"emoji": "🔴", "label": "CRITICAL", "border": "#c0392b", "bg": "#fdecea"},
+    "major":    {"emoji": "🟠", "label": "MAJOR",    "border": "#d35400", "bg": "#fef0e6"},
+    "minor":    {"emoji": "🟡", "label": "MINOR",    "border": "#b7950b", "bg": "#fff8db"},
+    "info":     {"emoji": "⚪", "label": "INFO",     "border": "#7f8c8d", "bg": "#f2f3f4"},
+}
+_SEVERITY_ORDER = {"critical": 0, "major": 1, "minor": 2, "info": 3}
+
+
+# ----------------------------------------------------------------------
+# Per-session workdir (PDFs must survive across Streamlit reruns so the
+# citation renderer can still find them when the reviewer clicks
+# Accept/Dismiss). Cleared on a new upload.
+# ----------------------------------------------------------------------
+
+
+def _ensure_session_workdir() -> Path:
+    if "workdir" not in st.session_state or not Path(st.session_state["workdir"]).exists():
+        st.session_state["workdir"] = tempfile.mkdtemp(prefix="interlock_")
+    return Path(st.session_state["workdir"])
+
+
+def _reset_workdir() -> None:
+    old = st.session_state.get("workdir")
+    if old and Path(old).exists():
+        shutil.rmtree(old, ignore_errors=True)
+    st.session_state["workdir"] = tempfile.mkdtemp(prefix="interlock_")
+
+
+def _diagnostic_counts(pdf_path: str, doc_id: str, table_max_pages: int) -> dict[str, int]:
     try:
-        result = ingest(pdf_path, doc_id=doc_id)
+        result = ingest(pdf_path, doc_id=doc_id, table_max_pages=table_max_pages)
         params = extract_parameters(result.spans)
         return {
             "spans": len(result.spans),
@@ -55,90 +92,38 @@ def _diagnostic_counts(pdf_path: str, doc_id: str) -> dict[str, int]:
 
 
 # ----------------------------------------------------------------------
-# Page config + global styles
-# ----------------------------------------------------------------------
-
-st.set_page_config(
-    page_title="InterLock AI — Review",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# Per-severity color theme used for cards in the flag list.
-_SEVERITY = {
-    "critical": {"emoji": "🔴", "label": "CRITICAL", "border": "#c0392b", "bg": "#fdecea"},
-    "major":    {"emoji": "🟠", "label": "MAJOR",    "border": "#d35400", "bg": "#fef0e6"},
-    "minor":    {"emoji": "🟡", "label": "MINOR",    "border": "#b7950b", "bg": "#fff8db"},
-    "info":     {"emoji": "⚪", "label": "INFO",     "border": "#7f8c8d", "bg": "#f2f3f4"},
-}
-_SEVERITY_ORDER = {"critical": 0, "major": 1, "minor": 2, "info": 3}
-
-
-# ----------------------------------------------------------------------
-# Persistent temp dir per session (fix for the citation-render bug where
-# the previous implementation used `tempfile.TemporaryDirectory` as a
-# context manager that deleted the uploaded PDFs as soon as the pipeline
-# call returned — subsequent reruns triggered by Accept/Dismiss buttons
-# then tried to open paths that no longer existed and got
-# "no such file: /tmp/.../doc_a.pdf").
-# ----------------------------------------------------------------------
-
-
-def _ensure_session_workdir() -> Path:
-    """Return a per-session temp dir that lives across Streamlit reruns.
-
-    Streamlit's `session_state` survives reruns but is reset on a hard
-    refresh / new session, at which point we want a fresh temp dir.
-    """
-    if "workdir" not in st.session_state or not Path(st.session_state["workdir"]).exists():
-        st.session_state["workdir"] = tempfile.mkdtemp(prefix="interlock_")
-    return Path(st.session_state["workdir"])
-
-
-def _reset_workdir() -> None:
-    """Wipe and recreate the session workdir when new PDFs are uploaded."""
-    old = st.session_state.get("workdir")
-    if old and Path(old).exists():
-        shutil.rmtree(old, ignore_errors=True)
-    st.session_state["workdir"] = tempfile.mkdtemp(prefix="interlock_")
-
-
-# ----------------------------------------------------------------------
 # Header
 # ----------------------------------------------------------------------
 
 st.title("InterLock AI")
 st.markdown(
-    "**Cross-document discrepancy detection for engineering PDFs** — "
-    "upload two PDFs from the same project, get directional, cited, "
+    "**Cross-document discrepancy detection for engineering PDFs.** "
+    "Upload two PDFs from the same project — equipment specs, coordination "
+    "studies, design revisions — and InterLock surfaces directional, cited, "
     "severity-tiered parameter mismatches for review."
 )
 
+# Severity legend at the top — replaces the sidebar "How to read a flag" expander
+# so the reviewer sees what the colours mean before any review runs.
+st.markdown(
+    "<div style='display:flex;gap:12px;flex-wrap:wrap;font-size:0.85em;color:#555;'>"
+    f"{_SEVERITY['critical']['emoji']} critical (decimal-shift class)  "
+    f"{_SEVERITY['major']['emoji']} major (outside design tolerance)  "
+    f"{_SEVERITY['minor']['emoji']} minor (above manufacturing tolerance)  "
+    f"{_SEVERITY['info']['emoji']} info (within tolerance — hidden by default)"
+    "</div>",
+    unsafe_allow_html=True,
+)
+
+
 # ----------------------------------------------------------------------
-# Sidebar — controls + cost meter
+# Sidebar — three sliders + one toggle. No mode toggle, no cost meter.
 # ----------------------------------------------------------------------
 
 with st.sidebar:
     st.header("Review settings")
 
-    st.markdown("**Comparison mode**")
-    fixture_mode = st.radio(
-        "fixture mode",
-        options=("Revision diff (same layout)", "Cross-document (spec ↔ study)"),
-        index=0,
-        label_visibility="collapsed",
-        help=(
-            "Revision diff: Doc A and Doc B share layout (e.g., 60% baseline vs "
-            "90% revision of the same coordination study). The aligner pairs by "
-            "exact parameter name on the same page.\n\n"
-            "Cross-document: Doc A and Doc B are different document types "
-            "(e.g., transformer spec ↔ coordination study). The aligner uses "
-            "the canonical-name glossary and allows pairs across pages."
-        ),
-    )
-    cross_doc_mode = fixture_mode.startswith("Cross-document")
-
-    st.markdown("**Severity threshold**")
+    st.markdown("**Suppress flags below**")
     threshold = st.slider(
         "Suppress flags below this confidence",
         min_value=0.0,
@@ -147,55 +132,55 @@ with st.sidebar:
         step=0.05,
         label_visibility="collapsed",
         help=(
-            "Hide flags whose computed confidence falls below this value. "
-            "Suppressed flags remain accessible in the 'Suppressed' expander "
-            "below the main list."
+            "Confidence is extraction × match × authority, in [0, 1]. Flags "
+            "below this score stay accessible in the 'Suppressed' expander."
         ),
     )
 
-    st.markdown("**Significance reasoning**")
+    st.markdown("**AI-judged severity**")
     use_llm_judge = st.toggle(
-        "Use LLM to enrich severity (Claude Opus 4.7)",
-        value=False,
+        "AI rationale + downstream-effect propagation (on by default)",
+        value=True,
         help=(
-            "Off: rule-based severity from IEEE/IEC tolerance bands per parameter "
-            "family — fast, deterministic, free.\n\n"
-            "On: each surfaced flag is sent to Claude Opus 4.7 with a cached "
-            "engineering ontology. Returns severity + rationale + suspected "
-            "downstream effects. Adds ~2 s and ~$0.01 per new flag; cached "
-            "after first call so repeat runs cost ≈ $0."
+            "Each surfaced flag is sent to Claude Opus 4.7 with a cached "
+            "engineering ontology, returning a written rationale and a list "
+            "of downstream parameters that may be affected. Disk-cached, so "
+            "repeat runs cost nothing.\n\n"
+            "Toggle off for a fully deterministic, rule-only severity path."
         ),
     )
 
-    st.divider()
-    st.markdown("**Session cost so far**")
-    try:
-        s = cost_summary()
-        st.metric("Total spend (USD)", f"${s.total_usd:.4f}")
-        if s.by_provider:
-            for provider, amt in sorted(s.by_provider.items()):
-                st.caption(f"{provider}: ${amt:.4f}")
-        st.caption(f"{s.n_events} API call(s) recorded.")
-    except Exception:  # pragma: no cover
-        st.caption("Cost ledger unavailable.")
+    st.markdown("**Table-scan page cap**")
+    table_max_pages = st.slider(
+        "Camelot scans this many leading pages per PDF",
+        min_value=5,
+        max_value=200,
+        value=20,
+        step=5,
+        label_visibility="collapsed",
+        help=(
+            "Camelot table extraction scans this many pages from the start "
+            "of each PDF. Higher = more thorough but slower; the deployed UI "
+            "feels frozen above ~100 pages without progress feedback. "
+            "Increase if your PDFs put critical tables late."
+        ),
+    )
 
     st.divider()
     with st.expander("How to read a flag", expanded=False):
         st.markdown(
-            "- **Severity** is computed from a per-parameter-family tolerance "
-            "band (e.g., IEEE C57.12.00 §9.1 Table 17 for transformer "
-            "impedance). Within-tolerance changes classify as **info** and are "
-            "suppressed.\n"
-            "- **Authority** is the document declared as source-of-truth for "
-            "the parameter family. Today's rule is hardcoded for the locked "
-            "demo fixtures — Doc A is authoritative, Doc B is the deviation "
-            "candidate. Per-project configurable authority is platform-path.\n"
-            "- **Confidence** = extraction × match × authority. All three are "
-            "in [0, 1]; the product is what you see.\n"
-            "- **Citation** is a bbox-highlighted snippet of the source page. "
-            "Verify the finding in seconds without leaving the page.\n"
-            "- **Accept / Dismiss** records your verdict in the session; "
-            "accepted flags export as JSON for the audit log."
+            "- **Severity** comes from per-attribute tolerance bands sourced "
+            "from public standards (IEEE C57, IEC 60076, NEMA TR 1, "
+            "IEEE Std 242). Within-tolerance changes classify as `info` and "
+            "are hidden by default.\n"
+            "- **Confidence** = extraction × match × authority, in [0, 1].\n"
+            "- **Authority direction** — Doc A is treated as the source-of-"
+            "truth side; Doc B is the deviation candidate. Per-project "
+            "configurable authority is on the roadmap.\n"
+            "- **Citation** is a bounding-box snippet of the source page so "
+            "you can verify the finding without alt-tabbing.\n"
+            "- **Accept / Dismiss** records your verdict for the JSON audit "
+            "export at the bottom of the page."
         )
 
 
@@ -206,13 +191,13 @@ with st.sidebar:
 col_a, col_b = st.columns(2)
 with col_a:
     a_file = st.file_uploader(
-        "Doc A — authoritative (e.g., 60 % baseline or equipment spec)",
+        "Doc A (source of truth — e.g. equipment spec or 60 % baseline)",
         type="pdf",
         key="a",
     )
 with col_b:
     b_file = st.file_uploader(
-        "Doc B — downstream (e.g., 90 % revision or coordination study)",
+        "Doc B (deviation candidate — e.g. coordination study or 90 % revision)",
         type="pdf",
         key="b",
     )
@@ -230,7 +215,6 @@ def _flag_id(flag: Any) -> str:
 run = bool(a_file is not None and b_file is not None and st.button("Run review", type="primary"))
 
 if run:
-    # New upload = fresh workdir so a previous session's PDFs don't linger.
     _reset_workdir()
     workdir = _ensure_session_workdir()
     a_path = workdir / "doc_a.pdf"
@@ -238,44 +222,41 @@ if run:
     a_path.write_bytes(a_file.read())  # type: ignore[union-attr]
     b_path.write_bytes(b_file.read())  # type: ignore[union-attr]
 
-    # Staged progress — opaque spinners on long PDFs (e.g. IEEE 56-pp) felt
-    # like the app had hung. With st.status the reviewer sees per-stage timing
-    # and can read the Camelot 'No tables found' warnings as informational
-    # rather than fatal.
     t0 = time.time()
     try:
         with st.status("Reviewing PDFs…", expanded=True) as status:
-            status.write("⏳ Ingesting Doc A — PyMuPDF spans + Camelot tables")
-            status.write("⏳ Ingesting Doc B — same")
+            status.write("⏳ Ingesting Doc A (PyMuPDF spans + Camelot tables)")
+            status.write("⏳ Ingesting Doc B (same)")
             status.write(
-                "ℹ️ Camelot scans the first 20 pages of each PDF by default; "
-                "longer docs are capped so the UI stays responsive."
+                f"ℹ️ Camelot is scanning the first {table_max_pages} pages of each "
+                "PDF; adjust the slider in the sidebar to expand the scope."
             )
-            if cross_doc_mode:
-                status.write("⏳ Aligning across documents (canonical glossary + Voyage embeddings)")
-            else:
-                status.write("⏳ Aligning by exact name + page (revision-diff mode)")
-            status.write("⏳ Classifying severity (IEEE/IEC tolerance bands)")
+            status.write(
+                "⏳ Aligning across documents (exact name + canonical glossary + "
+                "Voyage embeddings + Pint unit normalisation)"
+            )
+            status.write("⏳ Classifying severity against IEEE / IEC tolerance bands")
             if use_llm_judge:
-                status.write("⏳ LLM significance judge (Claude Opus 4.7, cached)")
+                status.write("⏳ Asking the LLM for engineering rationale (cached)")
             flags = review_two_documents(
                 str(a_path),
                 str(b_path),
                 embed_fn=embed_voyage,
-                same_page_only=not cross_doc_mode,
+                same_page_only=False,  # Cross-page alignment always — auto-detect heuristic obsolete in v1.5
                 use_llm_judge=use_llm_judge,
+                table_max_pages=table_max_pages,
             )
             status.update(
-                label=f"Review done in {time.time() - t0:.1f}s",
+                label=f"Review complete in {time.time() - t0:.1f}s",
                 state="complete",
                 expanded=False,
             )
     except Exception as e:
         st.error(
             f"Review failed: {type(e).__name__}: {e}\n\n"
-            "Common causes: missing VOYAGE_API_KEY, malformed PDF, or "
-            "Voyage / Anthropic rate-limit. Check the sidebar cost meter and "
-            "the .env values, then try again."
+            "Common causes: missing `VOYAGE_API_KEY`, malformed PDF, or "
+            "Voyage / Anthropic rate-limit. Check your environment variables "
+            "and try again."
         )
         st.stop()
     elapsed = time.time() - t0
@@ -285,13 +266,10 @@ if run:
     st.session_state["b_path"] = str(b_path)
     st.session_state["elapsed"] = elapsed
     st.session_state["use_llm_judge_at_run"] = use_llm_judge
-    st.session_state["cross_doc_mode_at_run"] = cross_doc_mode
+    st.session_state["table_max_pages_at_run"] = table_max_pages
     st.session_state["decisions"] = {}
-    # Always grab per-doc diagnostic counts so the empty-state can explain
-    # *why* no flags surfaced (most often: zero extractable params on one
-    # or both sides of the pair).
-    st.session_state["diag_a"] = _diagnostic_counts(str(a_path), "doc_a")
-    st.session_state["diag_b"] = _diagnostic_counts(str(b_path), "doc_b")
+    st.session_state["diag_a"] = _diagnostic_counts(str(a_path), "doc_a", table_max_pages)
+    st.session_state["diag_b"] = _diagnostic_counts(str(b_path), "doc_b", table_max_pages)
 
 
 # ----------------------------------------------------------------------
@@ -322,9 +300,8 @@ if flags:
 
     sev_counts: dict[str, int] = {}
     for f in above:
-        sev_counts[getattr(f, "severity", "major")] = sev_counts.get(
-            getattr(f, "severity", "major"), 0
-        ) + 1
+        s = getattr(f, "severity", "major")
+        sev_counts[s] = sev_counts.get(s, 0) + 1
 
     cols = st.columns([2, 1, 1, 1, 1])
     cols[0].metric("Time", f"{elapsed:.1f} s")
@@ -333,66 +310,67 @@ if flags:
     cols[3].metric("🟠 Major", f"{sev_counts.get('major', 0)}")
     cols[4].metric("🟡 Minor", f"{sev_counts.get('minor', 0)}")
 
-    mode_label = (
-        "Cross-document (spec ↔ study)"
-        if st.session_state.get("cross_doc_mode_at_run")
-        else "Revision diff (same layout)"
+    judge_caption = (
+        "AI-judged severity + downstream effects"
+        if st.session_state.get("use_llm_judge_at_run")
+        else "Rule-based severity (deterministic mode)"
     )
-    judge_label = "with LLM enrichment" if st.session_state.get("use_llm_judge_at_run") else "rule-based severity"
-    st.caption(f"Mode: {mode_label} · {judge_label}")
+    st.caption(judge_caption)
 
     if not above and not below:
         diag_a = st.session_state.get("diag_a", {})
         diag_b = st.session_state.get("diag_b", {})
-        st.info("No mismatches surfaced.")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Doc A diagnostics**")
-            st.caption(
-                f"spans: {diag_a.get('spans', 0)} · "
-                f"tables: {diag_a.get('tables', 0)} · "
-                f"**extractable params: {diag_a.get('params', 0)}** · "
-                f"low-coverage pages: {diag_a.get('low_coverage_pages', 0)}"
-            )
-        with col2:
-            st.markdown("**Doc B diagnostics**")
-            st.caption(
-                f"spans: {diag_b.get('spans', 0)} · "
-                f"tables: {diag_b.get('tables', 0)} · "
-                f"**extractable params: {diag_b.get('params', 0)}** · "
-                f"low-coverage pages: {diag_b.get('low_coverage_pages', 0)}"
-            )
-        # Concrete hint based on counts
         a_p = diag_a.get("params", 0)
         b_p = diag_b.get("params", 0)
         if a_p == 0 and b_p == 0:
             st.warning(
-                "Both documents yielded **zero extractable parameters**. "
-                "Likely causes:\n\n"
-                "- **Prose-heavy technical paper** (e.g. SEL field-case paper): parameter values are described in sentences (\"the harmonic setting PCT2 is …\") rather than tabular layout. Current regex extractors require `Label: value` or domain-specific patterns. Documented as a system limitation in `docs/BACKLOG.md` (prose-embedded parameter extraction).\n"
-                "- **Meta / instructional document** (e.g. IEEE Guide for Preparation of Transformer Specs): the doc teaches how to write a spec rather than being a spec — most numeric values are in examples buried in prose.\n"
-                "- **Scanned PDF**: image-only pages produce zero spans without OCR. Check the `low-coverage pages` count above.\n\n"
-                "Use the demo fixtures `doc_a_60pct.pdf` + `doc_b_90pct.pdf` (revision diff) or `spec_xfmr_001.pdf` + `doc_a_60pct.pdf` (cross-doc) to see the system fire."
+                "**No common ground between these two documents.**  \n"
+                "Neither PDF yielded engineering parameters that the system "
+                "could extract. The two files look unrelated, or they are "
+                "prose-heavy / meta-instructional documents (parameters "
+                "embedded in sentences rather than `Label: value` rows), "
+                "or both pages were scanned images."
             )
         elif a_p == 0 or b_p == 0:
             empty_side = "A" if a_p == 0 else "B"
             other = "B" if empty_side == "A" else "A"
             st.warning(
-                f"Doc {empty_side} yielded zero extractable parameters while "
-                f"Doc {other} surfaced {max(a_p, b_p)}. No pairs can form. "
-                "See the empty-side diagnostics above; the most common cause "
-                "is a prose-heavy or meta-guide document."
+                f"**Only Doc {other} yielded extractable parameters.**  \n"
+                f"Doc {empty_side} produced 0 parameters; Doc {other} produced "
+                f"{max(a_p, b_p)}. Without parameters on both sides, no "
+                f"cross-document pairs can form. Doc {empty_side} is likely "
+                "prose-heavy, a meta / instructional document, or scanned."
             )
         else:
             st.info(
-                f"Both documents extracted parameters ({a_p} + {b_p}) but no "
-                "pairs aligned to a value mismatch. Either the named parameters "
-                "don't overlap across the two PDFs, every overlapping value is "
-                "unit-equivalent (Pint-normalized), or every difference is "
-                "below the suppression threshold. Try lowering the threshold "
-                "in the sidebar, or toggle Cross-document mode if the layouts "
-                "differ."
+                "**Documents extracted parameters but nothing aligned to a "
+                "mismatch.**  \n"
+                f"Doc A produced {a_p} parameters, Doc B produced {b_p}. "
+                "Either the parameters named in each don't overlap, every "
+                "overlapping value is unit-equivalent (e.g. `150 kVA` vs "
+                "`0.15 MVA`), or every numeric difference falls below the "
+                "suppression threshold. Lower the threshold in the sidebar "
+                "to surface lower-confidence flags."
             )
+
+        with st.expander("Diagnostic counts", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Doc A**")
+                st.caption(
+                    f"spans: {diag_a.get('spans', 0)} · "
+                    f"tables: {diag_a.get('tables', 0)} · "
+                    f"**extractable params: {a_p}** · "
+                    f"low-coverage pages: {diag_a.get('low_coverage_pages', 0)}"
+                )
+            with col2:
+                st.markdown("**Doc B**")
+                st.caption(
+                    f"spans: {diag_b.get('spans', 0)} · "
+                    f"tables: {diag_b.get('tables', 0)} · "
+                    f"**extractable params: {b_p}** · "
+                    f"low-coverage pages: {diag_b.get('low_coverage_pages', 0)}"
+                )
 
     for f in sorted(above, key=_flag_sort_key):
         fid = _flag_id(f)
@@ -419,9 +397,11 @@ if flags:
         ):
             st.markdown(_severity_chip(sev), unsafe_allow_html=True)
             st.markdown(f"**Rationale:** {f.rationale}")
-            st.caption(f"Attribute family: `{attr_family}` · Authority: {f.authority_rule}")
+            st.caption(
+                f"Attribute family: `{attr_family}` · "
+                f"Doc A treated as source of truth"
+            )
 
-            # Citation snippets
             cit_a = None
             cit_b = None
             err_a = err_b = None
@@ -435,16 +415,15 @@ if flags:
                 err_b = f"{type(e).__name__}: {e}"
             if err_a or err_b:
                 st.warning(
-                    "Citation snippet rendering failed (this is usually a "
-                    "stale path; re-run the review):\n"
-                    f"- A: {err_a or 'ok'}\n- B: {err_b or 'ok'}"
+                    "Citation snippet rendering failed — re-run the review:\n"
+                    f"- Doc A: {err_a or 'ok'}\n- Doc B: {err_b or 'ok'}"
                 )
 
             ca, cb = st.columns(2)
             with ca:
                 doc_label = Path(f.a_record.doc_id).name or "doc_a"
                 st.markdown(
-                    f"**Authoritative**  \n"
+                    f"**Doc A (source of truth)**  \n"
                     f"`{doc_label}` · page {f.a_record.page} · "
                     f"section: {f.a_record.section or '—'}"
                 )
@@ -454,7 +433,7 @@ if flags:
             with cb:
                 doc_label = Path(f.b_record.doc_id).name or "doc_b"
                 st.markdown(
-                    f"**Deviation candidate**  \n"
+                    f"**Doc B (deviation candidate)**  \n"
                     f"`{doc_label}` · page {f.b_record.page} · "
                     f"section: {f.b_record.section or '—'}"
                 )
@@ -492,8 +471,8 @@ if flags:
         ):
             st.caption(
                 "These flags were classified but their confidence is below "
-                f"the {threshold:.2f} suppression threshold. Lower the threshold "
-                "in the sidebar to surface them."
+                f"the {threshold:.2f} suppression threshold. Lower the "
+                "threshold in the sidebar to surface them."
             )
             for f in sorted(below, key=_flag_sort_key):
                 sev = getattr(f, "severity", "major")
