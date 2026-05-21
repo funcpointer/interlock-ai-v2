@@ -254,6 +254,32 @@ def _is_ocr_span(record: Any) -> bool:
     return bool(record.bbox[0] == 0 and record.bbox[1] == 0)
 
 
+def _span_excerpt(record: Any, context_chars: int = 120) -> str:
+    """Return the chunk of span_text around the record's raw_value.
+
+    Native spans hold one logical line already; the excerpt collapses to
+    the span_text itself. Vision-OCR spans hold whole-page text — we
+    locate the raw_value within and return ±context_chars around it with
+    ellipses so the reviewer sees the relevant fragment instead of the
+    entire page transcription.
+    """
+    text = record.span_text or ""
+    raw = (record.raw_value or "").strip()
+    if not raw or len(text) <= 300:
+        return text
+    idx = text.find(raw)
+    if idx < 0:
+        idx = text.lower().find(raw.lower())
+    if idx < 0:
+        # Fallback: first chunk only — at least bound the visible payload.
+        return text[: 2 * context_chars] + (" …" if len(text) > 2 * context_chars else "")
+    start = max(0, idx - context_chars)
+    end = min(len(text), idx + len(raw) + context_chars)
+    prefix = "… " if start > 0 else ""
+    suffix = " …" if end < len(text) else ""
+    return f"{prefix}{text[start:end]}{suffix}"
+
+
 run = bool(a_file is not None and b_file is not None and st.button("Run review", type="primary"))
 
 if run:
@@ -507,7 +533,7 @@ if flags:
                         st.image(cit_a.snippet_png, width=320)
                     else:
                         st.image(cit_a.snippet_png)
-                st.code(f.a_record.span_text, language="text")
+                st.code(_span_excerpt(f.a_record), language="text")
             with cb:
                 doc_label = Path(f.b_record.doc_id).name or "doc_b"
                 ocr_note_b = (
@@ -525,7 +551,7 @@ if flags:
                         st.image(cit_b.snippet_png, width=320)
                     else:
                         st.image(cit_b.snippet_png)
-                st.code(f.b_record.span_text, language="text")
+                st.code(_span_excerpt(f.b_record), language="text")
 
             b_accept, b_dismiss, _spacer = st.columns([1, 1, 4])
             with b_accept:
