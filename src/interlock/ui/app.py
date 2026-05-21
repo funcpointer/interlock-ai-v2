@@ -552,21 +552,34 @@ if flags:
         elif verdict == "dismissed":
             verdict_badge = " · ✖️ Dismissed"
 
+        pairing_conf = getattr(f, "pairing_confidence", 1.0)
+        weak_pair = pairing_conf < 0.75
+        pair_badge = " · ⚠️ weak pair" if weak_pair else ""
         header = (
             f"{_SEVERITY[sev]['emoji']} **{f.parameter}** · "
-            f"{dev_str} · confidence {f.confidence:.2f}{verdict_badge}"
+            f"{dev_str} · confidence {f.confidence:.2f}"
+            f"{pair_badge}{verdict_badge}"
         )
 
         with st.expander(
             header,
-            expanded=verdict is None and sev in {"critical", "major"},
+            expanded=verdict is None and sev in {"critical", "major"} and not weak_pair,
         ):
             st.markdown(_severity_chip(sev), unsafe_allow_html=True)
             st.markdown(f"**Rationale:** {f.rationale}")
-            st.caption(
+            cap = (
                 f"Attribute family: `{attr_family}` · "
+                f"pairing confidence {pairing_conf:.2f} · "
                 f"Doc A treated as source of truth"
             )
+            if weak_pair:
+                cap += (
+                    " · ⚠️ pairing is uncertain (no Device ID match; "
+                    "value-equality or low-similarity fallback) — verify "
+                    "these two records describe the same physical device "
+                    "before acting"
+                )
+            st.caption(cap)
 
             cit_a = None
             cit_b = None

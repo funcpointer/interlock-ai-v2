@@ -41,6 +41,11 @@ class Flag:
     severity: Severity = "major"  # default for back-compat with hand-built tests
     deviation_pct: float = 0.0
     attribute_family: str | None = None
+    # Mirror of AlignedPair.pairing_confidence so the UI can surface
+    # *why* a flag's overall confidence is what it is — "we're not sure
+    # these two records describe the same thing" is a different story
+    # than "we're sure they do but the value gap is small".
+    pairing_confidence: float = 1.0
 
 
 def detect_flags(
@@ -90,9 +95,12 @@ def detect_flags(
             continue
 
         decision = authority_for(p.a.doc_id, p.b.doc_id, p.a.name)
+        # Fold pairing_confidence into the match factor so a weak
+        # correspondence (e.g. value-equality fallback) doesn't get
+        # presented with the same authority as a Device-ID match.
         conf = flag_confidence(
             extraction=1.0,
-            match=p.name_match_confidence,
+            match=p.name_match_confidence * p.pairing_confidence,
             authority=decision.confidence,
         )
         out.append(
@@ -111,6 +119,7 @@ def detect_flags(
                 severity=severity,
                 deviation_pct=dev,
                 attribute_family=family,
+                pairing_confidence=p.pairing_confidence,
             )
         )
     return out

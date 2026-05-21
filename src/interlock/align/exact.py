@@ -41,6 +41,17 @@ class AlignedPair:
     b: ParameterRecord
     name_match_confidence: float
     value_equivalent: bool
+    # How certain we are this pair represents the same logical record
+    # across the two docs. Separate from name_match_confidence (which
+    # only scores name-string similarity) — pairing_confidence reflects
+    # the strength of the *correspondence rule* that fired:
+    #   1.0  entity_tag (Device ID) match — strongest, identity-based
+    #   0.9  single-instance unambiguous positional pair
+    #   0.75 multi-instance equal-count distinct-y positional pair
+    #   0.5  ambiguity fallback (value-equality after degeneracy gate)
+    # Defaults to 1.0 for back-compat with hand-built AlignedPair in
+    # legacy tests.
+    pairing_confidence: float = 1.0
 
 
 def _y_center(r: ParameterRecord) -> float:
@@ -92,44 +103,49 @@ def align_exact(
     a_counts = _counts(a)
     b_counts = _counts(b)
 
+    def _filtered_pool(ra: ParameterRecord) -> list[ParameterRecord]:
+        """Candidate B records for ``ra`` after all *identity* filters —
+        page, entity-tag agreement, and family prefix for string-valued
+        params. Does NOT subtract ``used_b``. Used both for choosing the
+        best candidate and for measuring the bucket's true ambiguity
+        (count + y-degeneracy) so the gate behaves consistently across
+        iterations within one (page, name) bucket."""
+        pool = [
+            rb
+            for rb in by_name_b.get(ra.name.strip().lower(), [])
+            if rb.page == ra.page
+        ]
+        if ra.entity_tag:
+            pool = [rb for rb in pool if rb.entity_tag == ra.entity_tag]
+        else:
+            pool = [rb for rb in pool if not rb.entity_tag]
+        if ra.normalized_magnitude is None:
+            fam_a = _string_family(ra.raw_value)
+            pool = [rb for rb in pool if _string_family(rb.raw_value) == fam_a]
+        return pool
+
     out: list[AlignedPair] = []
     used_b: set[int] = set()
     for ra in a:
-        candidates = by_name_b.get(ra.name.strip().lower(), [])
-        if not candidates:
+        # Identity-filtered pool: what we *could* pair with if no B were
+        # consumed. Drives the ambiguity decision.
+        pool = _filtered_pool(ra)
+        if not pool:
             continue
-        same_page = [rb for rb in candidates if rb.page == ra.page and id(rb) not in used_b]
+        # What's still available right now (subtract consumed B records).
+        same_page = [rb for rb in pool if id(rb) not in used_b]
         if not same_page:
             continue
-        # Entity-tag gate (highest priority). When the extractor captured a
-        # leading Device ID on this row, only pair with the same Device ID
-        # on the other side. Records without a tag never pair with tagged
-        # records — that cross-pair is exactly the failure mode where
-        # "⑥ KRP-C" gets matched against "21 LPS-RK" because the algorithm
-        # had no identity signal beyond name. If no same-tag candidate
-        # exists, the record goes unpaired (no false flag).
-        if ra.entity_tag:
-            same_page = [rb for rb in same_page if rb.entity_tag == ra.entity_tag]
-        else:
-            same_page = [rb for rb in same_page if not rb.entity_tag]
-        if not same_page:
-            continue
-        # String-valued (no normalized_magnitude): require same family prefix
-        # so KRP-C never pairs with LPS-RK. Position is still used to choose
-        # among same-family candidates.
-        if ra.normalized_magnitude is None:
-            fam_a = _string_family(ra.raw_value)
-            same_page = [rb for rb in same_page if _string_family(rb.raw_value) == fam_a]
-            if not same_page:
-                continue
+        tag_anchored = bool(ra.entity_tag)
         # Ambiguity gate: trigger when positional pairing can't be trusted.
         # Two distinct conditions both fold into "pair only on value equality":
         #   (a) Count mismatch with multi-instance — A has 2, B has 1 (or
         #       vice versa) for this (page, name). The fewer side has no
         #       way to identify which A position it corresponds to.
-        #   (b) OCR y-degeneracy — multiple B candidates all share one
-        #       y-center (vision OCR spans inherit the whole-page bbox),
-        #       so y-distance pairing collapses to first-in-iteration.
+        #   (b) OCR y-degeneracy — multiple identity-eligible B candidates
+        #       share one y-center (vision OCR spans inherit the whole-page
+        #       bbox). Measured on the unconsumed-pool so the gate stays
+        #       consistent for the second iteration in a bucket too.
         # Either way the safe move is: pair only an exact value-equal
         # candidate, else skip (no false flag from cross-position pairing).
         key = (ra.page, ra.name.strip().lower())
@@ -137,7 +153,7 @@ def align_exact(
         n_b = b_counts.get(key, 0)
         count_ambiguous = (n_a != n_b) and (n_a > 1 or n_b > 1)
         y_degenerate = (
-            len(same_page) > 1 and len({_y_center(rb) for rb in same_page}) == 1
+            len(pool) > 1 and len({_y_center(rb) for rb in pool}) == 1
         )
         if count_ambiguous or y_degenerate:
             value_match = next(
@@ -147,12 +163,16 @@ def align_exact(
             if value_match is None:
                 continue
             used_b.add(id(value_match))
+            # Ambiguity fallback: value-equal candidate is our only signal.
+            # Pair is genuine ("same value, no contradiction") but we have
+            # no positional evidence so confidence stays low.
             out.append(
                 AlignedPair(
                     a=ra,
                     b=value_match,
                     name_match_confidence=1.0,
                     value_equivalent=True,
+                    pairing_confidence=1.0 if tag_anchored else 0.5,
                 )
             )
             continue
@@ -160,12 +180,22 @@ def align_exact(
         if abs(_y_center(best_rb) - _y_center(ra)) > y_tol:
             continue
         used_b.add(id(best_rb))
+        # Positional pair confidence depends on how unambiguous the
+        # bucket was. Tag-anchored = 1.0; single-instance on both sides
+        # = 0.9; multi-instance equal-count distinct-y = 0.75.
+        if tag_anchored:
+            pconf = 1.0
+        elif n_a <= 1 and n_b <= 1:
+            pconf = 0.9
+        else:
+            pconf = 0.75
         out.append(
             AlignedPair(
                 a=ra,
                 b=best_rb,
                 name_match_confidence=1.0,
                 value_equivalent=equivalent(ra.raw_value, best_rb.raw_value),
+                pairing_confidence=pconf,
             )
         )
     return out

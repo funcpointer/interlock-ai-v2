@@ -126,6 +126,11 @@ def align_semantic(
                     b=best_rb,
                     name_match_confidence=best_sim,
                     value_equivalent=equivalent(ra.raw_value, best_rb.raw_value),
+                    # Semantic alignment lacks positional/identity anchors
+                    # entirely — the cosine similarity is the only signal.
+                    # Reuse it as the pairing confidence so downstream UI
+                    # gating treats weak embedding pairs as weak pairs.
+                    pairing_confidence=best_sim,
                 )
             )
     return out

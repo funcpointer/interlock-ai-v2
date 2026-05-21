@@ -221,6 +221,48 @@ def test_tagged_and_untagged_records_never_cross_pair() -> None:
     assert pairs == []
 
 
+def test_pairing_confidence_reflects_rule_strength() -> None:
+    """Confidence scoring per pairing rule:
+      1.0  Device ID match
+      0.9  single-instance positional
+      0.75 multi-instance distinct-y positional
+      0.5  value-equality ambiguity fallback
+    """
+    # 1.0 — tag match
+    a1 = [_p("Fuse Designation", "A", "KRP-C-1600SP", page=5, y=100, entity_tag="6")]
+    b1 = [_p("Fuse Designation", "B", "KRP-C-1200SP", page=5, y=300, entity_tag="6")]
+    assert align_exact(a1, b1)[0].pairing_confidence == 1.0
+
+    # 0.9 — single-instance positional
+    a2 = [_p("%Z", "A", "5.75 %", mag=0.0575, page=3, y=100)]
+    b2 = [_p("%Z", "B", "0.575 %", mag=0.00575, page=3, y=100)]
+    assert align_exact(a2, b2)[0].pairing_confidence == 0.9
+
+    # 0.75 — multi-instance equal-count distinct-y
+    a3 = [
+        _p("Transformer Rating", "A", "1000 kVA", mag=1_000_000, page=7, y=100),
+        _p("Transformer Rating", "A", "150 kVA", mag=150_000, page=7, y=300),
+    ]
+    b3 = [
+        _p("Transformer Rating", "B", "100 kVA", mag=100_000, page=7, y=100),
+        _p("Transformer Rating", "B", "0.15 MVA", mag=150_000, page=7, y=300),
+    ]
+    pairs3 = align_exact(a3, b3)
+    assert all(p.pairing_confidence == 0.75 for p in pairs3)
+
+    # 0.5 — value-equality fallback (OCR y-degeneracy)
+    a4 = [
+        _p("Fuse Designation", "A", "LPS-RK-100SP", page=6, y=100),
+        _p("Fuse Designation", "A", "LPS-RK-400SP", page=6, y=300),
+    ]
+    b4 = [
+        _p("Fuse Designation", "B", "LPS-RK-400SP", page=6, y=0),
+        _p("Fuse Designation", "B", "LPS-RK-100SP", page=6, y=0),
+    ]
+    pairs4 = align_exact(a4, b4)
+    assert all(p.pairing_confidence == 0.5 for p in pairs4)
+
+
 def test_untagged_records_still_pair_when_both_lack_tags() -> None:
     """Back-compat: pages with no Device IDs still pair via existing
     positional/family/value gates."""
