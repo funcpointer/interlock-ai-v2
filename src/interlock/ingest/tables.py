@@ -3,13 +3,20 @@
 Camelot may produce zero tables if a PDF lays out text in columns visually without
 real table structure (common in promotional engineering PDFs). The function
 returns an empty list rather than raising in that case.
+
+Image-only PDFs (scans) are detected up front via PyMuPDF text-density and
+skipped — Camelot warns 'page-N is image-based' on every page otherwise,
+flooding the log without producing any tables. Vision OCR (in
+``ingest/vision_fallback.py``) is the appropriate path for those docs.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import camelot
+import fitz
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,28 @@ def _page_spec(pdf_path: str, max_pages: int | None) -> str:
     return f"1-{upper}" if upper >= 1 else "1"
 
 
+_IMAGE_ONLY_TEXT_THRESHOLD = 80
+
+
+def _is_image_only(pdf_path: str, max_pages: int | None) -> bool:
+    """True if every (capped) page yields < 80 native characters.
+
+    Camelot has no value on such PDFs and emits a 'page-N is image-based'
+    warning per page; we short-circuit before invoking it.
+    """
+    doc = fitz.open(pdf_path)
+    try:
+        n = len(doc)
+        upper = min(n, max_pages) if max_pages and max_pages > 0 else n
+        for i in range(upper):
+            text = doc[i].get_text("text").strip()
+            if len(text) >= _IMAGE_ONLY_TEXT_THRESHOLD:
+                return False
+        return True
+    finally:
+        doc.close()
+
+
 def extract_tables(
     pdf_path: str,
     pages: str | None = None,
@@ -59,13 +88,28 @@ def extract_tables(
     whole IEEE 56-page guide on every ingest. Pass an explicit ``pages``
     string (e.g. ``"1-3,7"``) or ``pages="all"``/``max_pages=None`` to
     override.
+
+    Image-only PDFs short-circuit to an empty list — Camelot can't parse
+    them and only emits warnings. Vision OCR handles those pages instead.
     """
     did = doc_id or pdf_path
+    if _is_image_only(pdf_path, max_pages):
+        return []
     page_spec = pages if pages is not None else _page_spec(pdf_path, max_pages)
     out: list[Table] = []
     for flavor in ("lattice", "stream"):
         try:
-            ts = camelot.read_pdf(pdf_path, pages=page_spec, flavor=flavor)  # type: ignore[attr-defined]
+            with warnings.catch_warnings():
+                # 'page-N is image-based, camelot only works on text-based pages.'
+                # We've already short-circuited fully image-only PDFs above; this
+                # filter just silences the noise on mixed PDFs where some pages
+                # happen to be scanned.
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"page-\d+ is image-based.*",
+                    category=UserWarning,
+                )
+                ts = camelot.read_pdf(pdf_path, pages=page_spec, flavor=flavor)  # type: ignore[attr-defined]
         except Exception:
             continue
         if len(ts) == 0:
