@@ -1,4 +1,8 @@
-from interlock.pipeline import review_two_documents
+from interlock.pipeline import (
+    ReviewResult,
+    review_two_documents,
+    review_two_documents_full,
+)
 
 DOC_A = "fixtures/pdfs/doc_a_60pct.pdf"
 DOC_B = "fixtures/pdfs/doc_b_90pct.pdf"
@@ -39,6 +43,34 @@ def test_pipeline_emits_directional_flags() -> None:
         assert f.b_record.page >= 1
         assert f.a_record.span_text
         assert f.b_record.span_text
+
+
+def test_review_two_documents_full_returns_review_result() -> None:
+    """The _full variant returns ReviewResult; the legacy shim still
+    returns just the flag list."""
+    result = review_two_documents_full(DOC_A, DOC_B, embed_fn=_trivial_embedder)
+    assert isinstance(result, ReviewResult)
+    assert isinstance(result.flags, list)
+    assert isinstance(result.unpaired_a, list)
+    assert isinstance(result.unpaired_b, list)
+    # Legacy shim must return the same flag list.
+    legacy_flags = review_two_documents(DOC_A, DOC_B, embed_fn=_trivial_embedder)
+    assert {(f.parameter, f.a_record.raw_value, f.b_record.raw_value) for f in legacy_flags} == {
+        (f.parameter, f.a_record.raw_value, f.b_record.raw_value) for f in result.flags
+    }
+
+
+def test_unpaired_records_disjoint_from_paired_records() -> None:
+    """Every unpaired record must NOT appear as a.a_record or b.b_record
+    in any flag — otherwise the UI would double-count the same record as
+    both a flag AND a gap."""
+    result = review_two_documents_full(DOC_A, DOC_B, embed_fn=_trivial_embedder)
+    flagged_a_ids = {id(f.a_record) for f in result.flags}
+    flagged_b_ids = {id(f.b_record) for f in result.flags}
+    for r in result.unpaired_a:
+        assert id(r) not in flagged_a_ids, f"record both unpaired and flagged: {r.name}={r.raw_value}"
+    for r in result.unpaired_b:
+        assert id(r) not in flagged_b_ids, f"record both unpaired and flagged: {r.name}={r.raw_value}"
 
 
 def test_pipeline_stage_cb_fires_in_order() -> None:

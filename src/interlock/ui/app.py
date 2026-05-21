@@ -36,7 +36,7 @@ from interlock.align.embed import embed_voyage  # noqa: E402
 from interlock.citation.render import render_citation  # noqa: E402
 from interlock.extract.parameters import extract_parameters  # noqa: E402
 from interlock.ingest.pdf import ingest  # noqa: E402
-from interlock.pipeline import review_two_documents  # noqa: E402
+from interlock.pipeline import review_two_documents_full  # noqa: E402
 
 
 # ----------------------------------------------------------------------
@@ -391,7 +391,7 @@ if run:
                         f"✅ Vision OCR on low-coverage pages · {total} page(s) · {dt:.1f}s"
                     )
 
-            flags = review_two_documents(
+            review_result = review_two_documents_full(
                 str(a_path),
                 str(b_path),
                 embed_fn=embed_voyage,
@@ -402,6 +402,7 @@ if run:
                 ocr_progress_cb=_ocr_cb if enable_vision_ocr else None,
                 stage_cb=_stage_cb,
             )
+            flags = review_result.flags
             status.update(
                 label=f"Review complete in {time.time() - t0:.1f}s",
                 state="complete",
@@ -418,6 +419,8 @@ if run:
     elapsed = time.time() - t0
 
     st.session_state["flags"] = flags
+    st.session_state["unpaired_a"] = review_result.unpaired_a
+    st.session_state["unpaired_b"] = review_result.unpaired_b
     st.session_state["a_path"] = str(a_path)
     st.session_state["b_path"] = str(b_path)
     st.session_state["elapsed"] = elapsed
@@ -661,6 +664,38 @@ if flags:
                     f"{_SEVERITY[sev]['emoji']} **[{f.confidence:.2f}]** "
                     f"`{f.parameter}` · {f.rationale}"
                 )
+
+    unpaired_a = st.session_state.get("unpaired_a", [])
+    unpaired_b = st.session_state.get("unpaired_b", [])
+    if unpaired_a or unpaired_b:
+        with st.expander(
+            f"📋 Unpaired records — {len(unpaired_a)} in Doc A, "
+            f"{len(unpaired_b)} in Doc B (not compared)",
+            expanded=False,
+        ):
+            st.caption(
+                "These parameter records had no confident counterpart in the "
+                "other document and were NOT compared. Common reasons: "
+                "different Device ID (table row), present in one doc but "
+                "absent from the other, or OCR ambiguity prevented a safe "
+                "pairing. Review manually to confirm none represent a real "
+                "deletion or specification gap."
+            )
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.markdown(f"**Doc A — {len(unpaired_a)} unpaired**")
+                for r in sorted(unpaired_a, key=lambda x: (x.page, x.name, x.raw_value)):
+                    tag = f"`#{r.entity_tag}` " if r.entity_tag else ""
+                    st.markdown(
+                        f"- p{r.page} · {tag}**{r.name}** · `{r.raw_value}`"
+                    )
+            with col_b:
+                st.markdown(f"**Doc B — {len(unpaired_b)} unpaired**")
+                for r in sorted(unpaired_b, key=lambda x: (x.page, x.name, x.raw_value)):
+                    tag = f"`#{r.entity_tag}` " if r.entity_tag else ""
+                    st.markdown(
+                        f"- p{r.page} · {tag}**{r.name}** · `{r.raw_value}`"
+                    )
 
     accepted = [
         d for d in st.session_state["decisions"].values() if d.get("verdict") == "accepted"

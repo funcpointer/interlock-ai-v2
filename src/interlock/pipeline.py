@@ -11,6 +11,7 @@ Streamlit app can wire Voyage.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from interlock.align.claims import align_claims_exact
@@ -20,9 +21,22 @@ from interlock.align.semantic import align_semantic
 from interlock.detect.mismatch import Flag, detect_flags
 from interlock.detect.significance import apply_judgment_to_flag, judge
 from interlock.extract.entities import claims_from_records
-from interlock.extract.parameters import extract_parameters
+from interlock.extract.parameters import ParameterRecord, extract_parameters
 from interlock.ingest.pdf import ingest
 from interlock.store import sqlite as store
+
+
+@dataclass(frozen=True)
+class ReviewResult:
+    """Rich pipeline output. ``flags`` is what the detector emitted; the
+    ``unpaired_*`` lists are records the aligner couldn't confidently pair
+    across documents (different Device IDs, no positional anchor, etc.) —
+    surfacing them lets the reviewer see WHAT we didn't compare instead
+    of treating silent gaps as clean runs."""
+
+    flags: list[Flag]
+    unpaired_a: list[ParameterRecord] = field(default_factory=list)
+    unpaired_b: list[ParameterRecord] = field(default_factory=list)
 
 EmbedFn = Callable[[list[str]], dict[str, list[float]]]
 # (stage_id, state) where state is "start" or "done". stage_id values are
@@ -34,7 +48,7 @@ if TYPE_CHECKING:
     from interlock.ingest.pdf import OcrProgressCallback
 
 
-def review_two_documents(
+def review_two_documents_full(
     pdf_a: str,
     pdf_b: str,
     embed_fn: EmbedFn,
@@ -50,7 +64,7 @@ def review_two_documents(
     enable_vision_ocr: bool = False,
     ocr_progress_cb: OcrProgressCallback | None = None,
     stage_cb: StageCallback | None = None,
-) -> list[Flag]:
+) -> ReviewResult:
     """Run end-to-end review.
 
     ``same_page_only=True`` (default) suits revision-diff fixtures where the two
@@ -139,4 +153,55 @@ def review_two_documents(
         _stage("judge", "start")
         flags = [apply_judgment_to_flag(f, judge(f)) for f in flags]
         _stage("judge", "done")
-    return flags
+
+    # Compute unpaired sets from the COMBINED aligned-pair list (before
+    # detect_flags filtering, so the reviewer sees every record that had
+    # no cross-doc counterpart — not just ones that survived severity
+    # classification). Identity by object — pa/pb were the lists handed
+    # to the aligners, so id()-equality is exact.
+    paired_a_ids = {id(p.a) for p in combined}
+    paired_b_ids = {id(p.b) for p in combined}
+    unpaired_a = [r for r in pa if id(r) not in paired_a_ids]
+    unpaired_b = [r for r in pb if id(r) not in paired_b_ids]
+    return ReviewResult(flags=flags, unpaired_a=unpaired_a, unpaired_b=unpaired_b)
+
+
+def review_two_documents(
+    pdf_a: str,
+    pdf_b: str,
+    embed_fn: EmbedFn,
+    doc_a_id: str = "doc_a",
+    doc_b_id: str = "doc_b",
+    same_page_only: bool = True,
+    use_llm_judge: bool = False,
+    suppress_info: bool = True,
+    use_claim_layer: bool = False,
+    same_entity_only: bool = True,
+    persist_claims: bool = False,
+    table_max_pages: int | None = None,
+    enable_vision_ocr: bool = False,
+    ocr_progress_cb: OcrProgressCallback | None = None,
+    stage_cb: StageCallback | None = None,
+) -> list[Flag]:
+    """Back-compat shim: returns only the flag list.
+
+    New callers should prefer ``review_two_documents_full()`` which also
+    returns the unpaired-record lists for honest gap reporting in the UI.
+    """
+    return review_two_documents_full(
+        pdf_a=pdf_a,
+        pdf_b=pdf_b,
+        embed_fn=embed_fn,
+        doc_a_id=doc_a_id,
+        doc_b_id=doc_b_id,
+        same_page_only=same_page_only,
+        use_llm_judge=use_llm_judge,
+        suppress_info=suppress_info,
+        use_claim_layer=use_claim_layer,
+        same_entity_only=same_entity_only,
+        persist_claims=persist_claims,
+        table_max_pages=table_max_pages,
+        enable_vision_ocr=enable_vision_ocr,
+        ocr_progress_cb=ocr_progress_cb,
+        stage_cb=stage_cb,
+    ).flags
