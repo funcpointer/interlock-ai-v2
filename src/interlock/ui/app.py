@@ -232,7 +232,26 @@ with col_b:
 
 
 def _flag_id(flag: Any) -> str:
-    return f"{flag.parameter}|p{flag.a_record.page}|y{int(flag.a_record.bbox[1])}"
+    """Unique key per flag for Streamlit widget IDs.
+
+    Just (parameter, page, y0) is not unique — a doc with several spans of
+    the same name on the same page at near-zero y produces colliding keys
+    (StreamlitDuplicateElementKey). Include both records' bboxes + raw values
+    to guarantee uniqueness across the surfaced flag set.
+    """
+    a = flag.a_record
+    b = flag.b_record
+    return (
+        f"{flag.parameter}"
+        f"|a:p{a.page}y{int(a.bbox[1])}x{int(a.bbox[0])}:{a.raw_value}"
+        f"|b:p{b.page}y{int(b.bbox[1])}x{int(b.bbox[0])}:{b.raw_value}"
+    )
+
+
+def _is_ocr_span(record: Any) -> bool:
+    """A vision-OCR span has its bbox set to the full page rectangle
+    (x0=0 at the bottom-left). Used to render a different snippet style."""
+    return bool(record.bbox[0] == 0 and record.bbox[1] == 0)
 
 
 run = bool(a_file is not None and b_file is not None and st.button("Run review", type="primary"))
@@ -471,23 +490,41 @@ if flags:
             ca, cb = st.columns(2)
             with ca:
                 doc_label = Path(f.a_record.doc_id).name or "doc_a"
+                ocr_note_a = (
+                    " · 🔍 OCR (whole-page snippet — vision model has no per-word bbox)"
+                    if _is_ocr_span(f.a_record)
+                    else ""
+                )
                 st.markdown(
                     f"**Doc A (source of truth)**  \n"
                     f"`{doc_label}` · page {f.a_record.page} · "
-                    f"section: {f.a_record.section or '—'}"
+                    f"section: {f.a_record.section or '—'}{ocr_note_a}"
                 )
                 if cit_a is not None:
-                    st.image(cit_a.snippet_png)
+                    # Smaller display width for whole-page OCR snippets so the
+                    # column doesn't dwarf the narrow-span deviation side.
+                    if _is_ocr_span(f.a_record):
+                        st.image(cit_a.snippet_png, width=320)
+                    else:
+                        st.image(cit_a.snippet_png)
                 st.code(f.a_record.span_text, language="text")
             with cb:
                 doc_label = Path(f.b_record.doc_id).name or "doc_b"
+                ocr_note_b = (
+                    " · 🔍 OCR (whole-page snippet — vision model has no per-word bbox)"
+                    if _is_ocr_span(f.b_record)
+                    else ""
+                )
                 st.markdown(
                     f"**Doc B (deviation candidate)**  \n"
                     f"`{doc_label}` · page {f.b_record.page} · "
-                    f"section: {f.b_record.section or '—'}"
+                    f"section: {f.b_record.section or '—'}{ocr_note_b}"
                 )
                 if cit_b is not None:
-                    st.image(cit_b.snippet_png)
+                    if _is_ocr_span(f.b_record):
+                        st.image(cit_b.snippet_png, width=320)
+                    else:
+                        st.image(cit_b.snippet_png)
                 st.code(f.b_record.span_text, language="text")
 
             b_accept, b_dismiss, _spacer = st.columns([1, 1, 4])
