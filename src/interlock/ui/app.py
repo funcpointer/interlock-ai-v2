@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -254,6 +255,42 @@ def _is_ocr_span(record: Any) -> bool:
     return bool(record.bbox[0] == 0 and record.bbox[1] == 0)
 
 
+def _locate_raw_value(text: str, raw: str) -> tuple[int, int]:
+    """Return ``(start, end)`` of raw_value within text, or ``(-1, -1)``.
+
+    raw_value is built as ``f"{token} {unit}"`` (e.g. ``"5.75 %"``) but the
+    surface form in PDFs often elides the space (``"5.75%Z"``). We try:
+
+      1. exact (case-insensitive)
+      2. whitespace-flexible regex (``5\\.75\\s*%``)
+      3. leading numeric token alone (``5.75``)
+
+    Each tier locates the actual offset and length in the original text so
+    the excerpt window centers on what the reviewer is looking for.
+    """
+    if not raw:
+        return -1, -1
+    idx = text.find(raw)
+    if idx >= 0:
+        return idx, idx + len(raw)
+    idx = text.lower().find(raw.lower())
+    if idx >= 0:
+        return idx, idx + len(raw)
+    # Whitespace-flexible: each \s+ in raw becomes \s* in the search.
+    parts = [re.escape(p) for p in re.split(r"\s+", raw) if p]
+    if parts:
+        m = re.search(r"\s*".join(parts), text, re.IGNORECASE)
+        if m is not None:
+            return m.start(), m.end()
+    # Numeric token alone — catches "5.75" inside "5.75%Z".
+    nm = re.search(r"\d[\d,]*\.?\d*", raw)
+    if nm is not None:
+        tm = re.search(re.escape(nm.group(0)), text)
+        if tm is not None:
+            return tm.start(), tm.end()
+    return -1, -1
+
+
 def _span_excerpt(record: Any, context_chars: int = 120) -> str:
     """Return the chunk of span_text around the record's raw_value.
 
@@ -267,14 +304,12 @@ def _span_excerpt(record: Any, context_chars: int = 120) -> str:
     raw = (record.raw_value or "").strip()
     if not raw or len(text) <= 300:
         return text
-    idx = text.find(raw)
-    if idx < 0:
-        idx = text.lower().find(raw.lower())
-    if idx < 0:
+    start_idx, end_idx = _locate_raw_value(text, raw)
+    if start_idx < 0:
         # Fallback: first chunk only — at least bound the visible payload.
         return text[: 2 * context_chars] + (" …" if len(text) > 2 * context_chars else "")
-    start = max(0, idx - context_chars)
-    end = min(len(text), idx + len(raw) + context_chars)
+    start = max(0, start_idx - context_chars)
+    end = min(len(text), end_idx + context_chars)
     prefix = "… " if start > 0 else ""
     suffix = " …" if end < len(text) else ""
     return f"{prefix}{text[start:end]}{suffix}"
