@@ -20,13 +20,34 @@ from anthropic import Anthropic
 from interlock.cache import disk as disk_cache
 
 MODEL = "claude-sonnet-4-5"
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 PROMPT = (
-    "You are extracting engineering parameters from a single PDF page image. "
-    "Return STRICT JSON only with this shape: "
-    '{"text": <full extracted text as a single string>, '
-    '"confidence": <number between 0 and 1>}. '
-    "Preserve Greek letters and electrical units (Ω, μF, kV, MVA) and table structure."
+    "You are an OCR engine for a single PDF page image of an engineering "
+    "document. Transcribe every visible character verbatim. Do not paraphrase, "
+    "summarize, translate, correct, or interpret content.\n\n"
+    "Output format: STRICT JSON only — no prose, no fences, no commentary. "
+    "Schema:\n"
+    '{"text": <string>, "confidence": <number between 0 and 1>}\n\n'
+    "Transcription rules:\n"
+    "- Preserve visual reading order: top to bottom. In multi-column layouts "
+    "transcribe the left column fully before the right column. Never interleave "
+    "columns or glue unrelated lines together.\n"
+    "- Preserve line breaks. Each visual line on the page becomes one "
+    "newline-separated line in `text`. Do not merge lines that belong to "
+    "different paragraphs, list items, table rows, or columns.\n"
+    "- Preserve list numbering (\"1.\", \"a)\", \"i.\"), bullet markers, and "
+    "indentation with leading spaces.\n"
+    "- Preserve tables. Emit one row per line with cells separated by \" | \" "
+    "(space pipe space). Keep the header row first if present.\n"
+    "- Preserve Greek letters, electrical units, and engineering notation "
+    "exactly: Ω, μ, μF, kV, MVA, kVA, °C, %, %Z, kA, mA, Hz, °, Δ, θ, Φ, λ, Σ.\n"
+    "- Preserve numeric formats including thousands separators (e.g. 20,000), "
+    "decimals (e.g. 5.75), scientific notation, and signed values.\n"
+    "- If a character is illegible, emit \"?\" in that position rather than "
+    "guessing.\n"
+    "- `confidence` reflects overall page legibility (1.0 = print-quality, "
+    "0.5 = scanner artifacts present, 0.2 = heavily degraded). It is not a "
+    "judgment about content correctness."
 )
 _DPI = 200
 

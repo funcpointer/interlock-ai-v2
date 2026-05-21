@@ -4,7 +4,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from interlock.cache import disk as disk_cache
-from interlock.ingest.vision_fallback import VisionResult, vision_extract_page
+from interlock.ingest.vision_fallback import (
+    PROMPT,
+    PROMPT_VERSION,
+    VisionResult,
+    vision_extract_page,
+)
 
 DOC_A = Path("fixtures/pdfs/doc_a_60pct.pdf")
 
@@ -31,6 +36,22 @@ def test_vision_extract_page_returns_text_and_confidence(mocker) -> None:  # typ
     assert isinstance(result, VisionResult)
     assert "5.75" in result.text
     assert 0 < result.confidence <= 1
+
+
+def test_prompt_includes_critical_transcription_directives() -> None:
+    """Regression guard for OCR snippet quality.
+
+    Without explicit line-break / column-order / verbatim directives the
+    model glues unrelated lines together and downstream excerpts read as
+    nonsense ("proceed 0.575%Z, liquid"). Lock those rules in.
+    """
+    low = PROMPT.lower()
+    assert "verbatim" in low, "must demand verbatim transcription"
+    assert "line break" in low or "newline" in low, "must require line-break preservation"
+    assert "column" in low, "must specify multi-column reading order"
+    assert "table" in low, "must specify table-row handling"
+    assert "%Z" in PROMPT, "must call out engineering notation"
+    assert PROMPT_VERSION, "PROMPT_VERSION must be non-empty (cache invalidation key)"
 
 
 def test_vision_extract_page_robust_to_extra_prose(mocker) -> None:  # type: ignore[no-untyped-def]
