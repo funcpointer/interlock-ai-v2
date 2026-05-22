@@ -11,6 +11,7 @@ Streamlit app can wire Voyage.
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,7 @@ from interlock.detect.significance import apply_judgment_to_flag, judge
 from interlock.extract.entities import claims_from_records
 from interlock.extract.parameters import ParameterRecord, extract_parameters
 from interlock.ingest.pdf import ingest
+from interlock.llm_pipeline.schemas.doc_class import DocClass, DocClassification
 from interlock.store import sqlite as store
 
 
@@ -32,11 +34,17 @@ class ReviewResult:
     ``unpaired_*`` lists are records the aligner couldn't confidently pair
     across documents (different Device IDs, no positional anchor, etc.) —
     surfacing them lets the reviewer see WHAT we didn't compare instead
-    of treating silent gaps as clean runs."""
+    of treating silent gaps as clean runs.
+
+    ``doc_class_a`` / ``doc_class_b`` are populated only when the pipeline
+    is called with ``classify_docs=True`` (v2 Sprint 1). Default ``None``
+    preserves v1 back-compat across the 261-test invariant suite."""
 
     flags: list[Flag]
     unpaired_a: list[ParameterRecord] = field(default_factory=list)
     unpaired_b: list[ParameterRecord] = field(default_factory=list)
+    doc_class_a: DocClassification | None = None
+    doc_class_b: DocClassification | None = None
 
 EmbedFn = Callable[[list[str]], dict[str, list[float]]]
 # (stage_id, state) where state is "start" or "done". stage_id values are
@@ -64,6 +72,7 @@ def review_two_documents_full(
     enable_vision_ocr: bool = False,
     ocr_progress_cb: OcrProgressCallback | None = None,
     stage_cb: StageCallback | None = None,
+    classify_docs: bool = False,
 ) -> ReviewResult:
     """Run end-to-end review.
 
@@ -104,6 +113,19 @@ def review_two_documents_full(
     def _stage(name: str, state: str) -> None:
         if stage_cb is not None:
             stage_cb(name, state)
+
+    # v2 Sprint 1: optional doc-class classifier runs in parallel with the
+    # rest of the pipeline. classify_docs=False (default) skips the call
+    # entirely → 261-test invariant preserved bit-for-bit.
+    doc_class_a: DocClassification | None = None
+    doc_class_b: DocClassification | None = None
+    classify_executor: ThreadPoolExecutor | None = None
+    if classify_docs:
+        from interlock.llm_pipeline.classify import classify_doc
+        _stage("classify", "start")
+        classify_executor = ThreadPoolExecutor(max_workers=2)
+        fut_a = classify_executor.submit(classify_doc, pdf_a)
+        fut_b = classify_executor.submit(classify_doc, pdf_b)
 
     _stage("ingest_a", "start")
     ia = ingest(
@@ -163,7 +185,35 @@ def review_two_documents_full(
     paired_b_ids = {id(p.b) for p in combined}
     unpaired_a = [r for r in pa if id(r) not in paired_a_ids]
     unpaired_b = [r for r in pb if id(r) not in paired_b_ids]
-    return ReviewResult(flags=flags, unpaired_a=unpaired_a, unpaired_b=unpaired_b)
+
+    # Drain classify futures (if running) and collapse failures to
+    # unknown(0.0) — pipeline keeps working even if the classifier
+    # outage / API timeout would otherwise propagate as an exception.
+    if classify_executor is not None:
+        try:
+            doc_class_a = fut_a.result()
+        except Exception as e:
+            doc_class_a = DocClassification(
+                doc_class=DocClass.unknown, confidence=0.0,
+                reasoning=f"classifier raised: {type(e).__name__}: {e}",
+            )
+        try:
+            doc_class_b = fut_b.result()
+        except Exception as e:
+            doc_class_b = DocClassification(
+                doc_class=DocClass.unknown, confidence=0.0,
+                reasoning=f"classifier raised: {type(e).__name__}: {e}",
+            )
+        classify_executor.shutdown(wait=False)
+        _stage("classify", "done")
+
+    return ReviewResult(
+        flags=flags,
+        unpaired_a=unpaired_a,
+        unpaired_b=unpaired_b,
+        doc_class_a=doc_class_a,
+        doc_class_b=doc_class_b,
+    )
 
 
 def review_two_documents(
@@ -182,6 +232,7 @@ def review_two_documents(
     enable_vision_ocr: bool = False,
     ocr_progress_cb: OcrProgressCallback | None = None,
     stage_cb: StageCallback | None = None,
+    classify_docs: bool = False,
 ) -> list[Flag]:
     """Back-compat shim: returns only the flag list.
 
@@ -204,4 +255,5 @@ def review_two_documents(
         enable_vision_ocr=enable_vision_ocr,
         ocr_progress_cb=ocr_progress_cb,
         stage_cb=stage_cb,
+        classify_docs=classify_docs,
     ).flags
