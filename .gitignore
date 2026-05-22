@@ -12,6 +12,7 @@ eval/results/*.json
 !eval/results/.gitkeep
 !eval/results/baseline.json
 !eval/results/ab_comparison.json
+!eval/results/doc_class.json
 data/cache/
 data/interlock.db
 data/interlock.db-shm
