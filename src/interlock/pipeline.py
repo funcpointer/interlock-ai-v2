@@ -73,6 +73,7 @@ def review_two_documents_full(
     ocr_progress_cb: OcrProgressCallback | None = None,
     stage_cb: StageCallback | None = None,
     classify_docs: bool = False,
+    use_llm_extraction: bool = False,
 ) -> ReviewResult:
     """Run end-to-end review.
 
@@ -151,6 +152,30 @@ def review_two_documents_full(
     pa = extract_parameters(ia.spans)
     pb = extract_parameters(ib.spans)
     _stage("extract", "done")
+
+    # v2 Sprint 2: Track 2 LLM extraction (opt-in via use_llm_extraction).
+    # Records appended after Track 1; alignment sees the union.
+    if use_llm_extraction:
+        from interlock.llm_pipeline.extract import extract_claims_from_doc
+
+        cls_a = doc_class_a.doc_class if doc_class_a is not None else DocClass.unknown
+        cls_b = doc_class_b.doc_class if doc_class_b is not None else DocClass.unknown
+
+        _stage("llm_extract_a", "start")
+        try:
+            llm_records_a = extract_claims_from_doc(pdf_a, cls_a, doc_id=doc_a_id)
+        except Exception:
+            llm_records_a = []
+        pa = pa + llm_records_a
+        _stage("llm_extract_a", "done")
+
+        _stage("llm_extract_b", "start")
+        try:
+            llm_records_b = extract_claims_from_doc(pdf_b, cls_b, doc_id=doc_b_id)
+        except Exception:
+            llm_records_b = []
+        pb = pb + llm_records_b
+        _stage("llm_extract_b", "done")
 
     _stage("align", "start")
     if use_claim_layer:
@@ -233,6 +258,7 @@ def review_two_documents(
     ocr_progress_cb: OcrProgressCallback | None = None,
     stage_cb: StageCallback | None = None,
     classify_docs: bool = False,
+    use_llm_extraction: bool = False,
 ) -> list[Flag]:
     """Back-compat shim: returns only the flag list.
 
@@ -256,4 +282,5 @@ def review_two_documents(
         ocr_progress_cb=ocr_progress_cb,
         stage_cb=stage_cb,
         classify_docs=classify_docs,
+        use_llm_extraction=use_llm_extraction,
     ).flags
