@@ -81,6 +81,20 @@ def _provenance_badge(provenance: str) -> str:
     return ""
 
 
+def _rerank_badge(flag: Any) -> str:
+    """Return reviewer-facing badge text for a flag's reranker status.
+
+    Reranked + strong score → '🤖 Reranked'.
+    Reranked + weak score (LLM ran but still uncertain) → '🤖 Reranked · ⚠️ low score'.
+    Not reranked → '' (caller falls back to the legacy ⚠️ weak pair badge).
+    """
+    if not getattr(flag, "rerank_rationale", None):
+        return ""
+    if getattr(flag, "pairing_confidence", 1.0) < 0.75:
+        return " · 🤖 Reranked · ⚠️ low score"
+    return " · 🤖 Reranked"
+
+
 # ----------------------------------------------------------------------
 # Per-session workdir (PDFs must survive across Streamlit reruns so the
 # citation renderer can still find them when the reviewer clicks
@@ -774,7 +788,10 @@ if flags:
 
         pairing_conf = getattr(f, "pairing_confidence", 1.0)
         weak_pair = pairing_conf < 0.75
-        pair_badge = " · ⚠️ weak pair" if weak_pair else ""
+        # v2 Sprint 4: rerank badge overrides the legacy weak-pair badge
+        # when the reranker has spoken on this pair.
+        rerank_b = _rerank_badge(f)
+        pair_badge = rerank_b if rerank_b else (" · ⚠️ weak pair" if weak_pair else "")
         # v2 Sprint 3: silent on rule_only, prominent on llm_only / mixed_track
         prov_badge = _provenance_badge(getattr(f, "provenance", "unknown"))
         header = (
@@ -817,6 +834,10 @@ if flags:
                     f"the same physical parameter."
                 )
             st.caption(cap)
+
+            # v2 Sprint 4: surface reranker rationale prominently when present.
+            if getattr(f, "rerank_rationale", None):
+                st.info(f"🤖 **Reranker:** {f.rerank_rationale}")
 
             cit_a = None
             cit_b = None
