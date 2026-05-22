@@ -19,6 +19,7 @@ real engineering changes that need a reviewer's eye.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from interlock.align.exact import AlignedPair
 from interlock.detect.authority import authority_for
@@ -46,6 +47,11 @@ class Flag:
     # these two records describe the same thing" is a different story
     # than "we're sure they do but the value gap is small".
     pairing_confidence: float = 1.0
+    # v2 Sprint 3 — provenance label derived from a_record.provenance +
+    # b_record.provenance by adjudicate_flags(). Default "unknown" for
+    # back-compat with hand-constructed Flags in tests; the adjudicator
+    # overwrites with the right label when invoked through the pipeline.
+    provenance: Literal["rule_only", "llm_only", "mixed_track", "unknown"] = "unknown"
 
 
 def detect_flags(
