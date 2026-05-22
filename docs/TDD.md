@@ -141,6 +141,33 @@ The current alignment is correct and conservative for the documents we tested ag
 3. Diverse fixture suite — HVAC schedule, P&ID, BOM-style spec; gold flags on each
 4. Calibration of `pairing_confidence` magnitudes against labelled ground truth
 
+## Known limits — Sprint 1 doc-class classifier (v2)
+
+The classifier ships behind `classify_docs=True` (default ON in UI; default OFF in the `review_two_documents` API). When OFF, OR when the classifier collapses to `unknown` (confidence < 0.6), the pipeline is bit-identical to `v1.5-mvp-ready`.
+
+**Architecture that generalises:**
+- `DocClass` enum + `DocClassification` Pydantic schema
+- `DOC_CLASS_TOLERANCE_OVERRIDES` per-class severity layer
+- `DOC_CLASS_AUTHORITY` per-class authority hierarchy
+- v1 fallback chain on every override (graceful degradation)
+- Diskcache by PDF content hash + model + prompt_version + DPI
+- Pipeline `classify_docs=False` snapshot-equivalence with v1 (CI-gated)
+
+**Heuristics + scope deliberately limited in Sprint 1:**
+- Concrete per-class overrides exist for **3 of 8 classes only** (`coordination_study` = v1 defaults made explicit; `equipment_spec` = tighter nameplate bands; `relay_setting_sheet` = relay-specific). The other 5 (`hvac_schedule`, `pid`, `bom`, `civil_drawing`, `unknown`) classify correctly but inherit v1 behaviour end-to-end. Sprint 2+ fills the rest.
+- Per-class extraction prompts exist as **empty stubs only**; the LLM-extraction module is Sprint 2.
+- Acceptance corpus is **11 docs (6 real + 5 synthetic)**, not the full 20-doc target. 9 real PDFs still pending sourcing for `coordination_study`, `equipment_spec`, `relay_setting_sheet`, `hvac_schedule`, `pid`, `bom`, `civil_drawing`. Per-class recall < 5 examples has high variance — surfaced in the eval report, not gated.
+- Real-doc sourcing skews toward electrical engineering. Civil + HVAC + P&ID + BOM coverage is lighter.
+- Synthetic docs are too clean; real-world variance unmeasured for the 5 classes they cover.
+- Sprint 1 OCR layer reuses v1 unchanged — no multi-engine consensus, no layout-aware extraction yet.
+
+**Generalisation plan** (post-Sprint 1):
+1. Sprint 2 — LLM extraction module fills the prompt registry, solves the prose-paper zero-yield case
+2. Sprint 3 — adjudicator merges Track 1 + Track 2 with per-flag provenance UX
+3. Sprint 4 — LLM pairing reranker replaces Phase 19's heuristic gates
+4. Sprint 5 — Standards-as-RAG replaces `DOC_CLASS_AUTHORITY` const with per-project precedence-ladder loading; coupled-effect graph traversal lands
+5. Continuous — corpus growth via reviewer accept/dismiss signals; per-class recall reported on every CI run
+
 ## Open questions + future work
 
 - **Entity fingerprinting** (BACKLOG R-F): binding an implicit equipment in one doc to a tagged equipment on the other via attribute fingerprint. Required for cross-doc multi-equipment demos.

@@ -141,6 +141,18 @@ with st.sidebar:
 
     # --- Input handling ---------------------------------------------------
 
+    classify_docs = st.toggle(
+        "Doc-class routing (v2 Sprint 1)",
+        value=True,
+        help=(
+            "When ON, each PDF is classified on upload (one VLM call per "
+            "doc, diskcached on content hash) and per-class tolerance "
+            "bands + authority hierarchy apply where defined. When OFF, "
+            "behaves bit-identically to v1.5-mvp-ready. Unknown "
+            "classifications fall back to v1 defaults regardless."
+        ),
+    )
+
     enable_vision_ocr = st.toggle(
         "Vision OCR for low-coverage pages",
         value=True,
@@ -433,6 +445,7 @@ if run:
                 enable_vision_ocr=enable_vision_ocr,
                 ocr_progress_cb=_ocr_cb if enable_vision_ocr else None,
                 stage_cb=_stage_cb,
+                classify_docs=classify_docs,
             )
             flags = review_result.flags
             status.update(
@@ -453,6 +466,8 @@ if run:
     st.session_state["flags"] = flags
     st.session_state["unpaired_a"] = review_result.unpaired_a
     st.session_state["unpaired_b"] = review_result.unpaired_b
+    st.session_state["doc_class_a"] = review_result.doc_class_a
+    st.session_state["doc_class_b"] = review_result.doc_class_b
     st.session_state["a_path"] = str(a_path)
     st.session_state["b_path"] = str(b_path)
     st.session_state["elapsed"] = elapsed
@@ -495,6 +510,48 @@ if flags:
     elapsed = st.session_state.get("elapsed", 0.0)
     above = [f for f in flags if f.confidence >= threshold]
     below = [f for f in flags if f.confidence < threshold]
+
+    # v2 Sprint 1: doc-class banner above metrics row. Shows what the
+    # classifier returned per doc and which severity bands / authority
+    # hierarchy are in effect for this review.
+    _dc_a = st.session_state.get("doc_class_a")
+    _dc_b = st.session_state.get("doc_class_b")
+    if _dc_a is not None and _dc_b is not None:
+        _bcol_a, _bcol_b = st.columns(2)
+
+        def _doc_class_banner(col: Any, label: str, dc: Any) -> None:
+            with col:
+                conf = dc.confidence
+                if conf >= 0.85:
+                    box_fn = st.success
+                elif conf >= 0.60:
+                    box_fn = st.info
+                else:
+                    box_fn = st.warning
+                pretty = dc.doc_class.value.replace("_", " ").title()
+                box_fn(
+                    f"📄 **{label}: {pretty}** ({conf:.2f})\n\n"
+                    f"_{dc.reasoning}_"
+                )
+
+        _doc_class_banner(_bcol_a, "Doc A", _dc_a)
+        _doc_class_banner(_bcol_b, "Doc B", _dc_b)
+        _inds_a = list(_dc_a.detected_indicators) if _dc_a.detected_indicators else []
+        _inds_b = list(_dc_b.detected_indicators) if _dc_b.detected_indicators else []
+        if _inds_a or _inds_b:
+            with st.expander(
+                f"Why these classifications? "
+                f"({len(_inds_a) + len(_inds_b)} indicators)",
+                expanded=False,
+            ):
+                if _inds_a:
+                    st.markdown("**Doc A indicators:**")
+                    for ind in _inds_a:
+                        st.markdown(f"- {ind}")
+                if _inds_b:
+                    st.markdown("**Doc B indicators:**")
+                    for ind in _inds_b:
+                        st.markdown(f"- {ind}")
 
     sev_counts: dict[str, int] = {}
     for f in above:

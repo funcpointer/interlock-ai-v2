@@ -93,6 +93,35 @@ This is disclosed in `docs/FIXTURES.md` §2 and §3, in the eval gold set, and i
 
 **Doc A of the Option 2 fixture pair (`fixtures/pdfs/spec_xfmr_001.pdf`) is also not a real document.** It is a deterministically generated synthetic transformer Equipment Data Sheet, produced by `fixtures/synthesis/generate_spec.py`, shaped to match an IEEE C57.12.00 / ANSI C57.12.10 nameplate spec. Used to demonstrate cross-document semantic alignment between heterogeneous document types when paired with the Eaton coordination study. Disclosed in `docs/FIXTURES.md` §2B. Real-spec curation (using a public manufacturer data sheet) is Option 4 in `docs/BACKLOG.md`.
 
+## Sprint 1 (v2) — Doc-class classifier + per-class hooks
+
+Shipped via 7 phase tags (`phase-24.1-classifier-schemas` → `phase-24.7-classifier-hooks`) on top of `v2.0-baseline-from-v1.5-mvp-ready`. Exit tag: `v2.0-mvp`.
+
+**Components landed:**
+- `src/interlock/llm_pipeline/schemas/doc_class.py` — `DocClass` enum (8 values) + `DocClassification` Pydantic model with confidence-range validation and frozen-model semantics for audit-trail safety
+- `src/interlock/llm_pipeline/classify.py` — multi-page VLM classifier (pages 1/2/last @ 300 DPI), `claude-opus-4-7`, Pydantic-validated structured output, diskcached on PDF content hash + model + prompt_version + DPI, confidence < 0.6 → `unknown` fallback, render-failure-safe (returns `unknown(0.0)` instead of raising)
+- `src/interlock/llm_pipeline/prompts/classify.md` — classification system prompt with 8 class definitions, confidence calibration ladder, and the **structure-over-authorial-intent** principle (live-API smoke proved v1 prompt was too strict — sample/educational documents that have the structural signals classify as the matching class, not `unknown`). Bumped to `PROMPT_VERSION = "v2"`.
+- `src/interlock/llm_pipeline/prompts/extract/<class>.md` × 7 — empty stubs for Sprint 2's extraction prompt registry + README explaining contract
+- `src/interlock/detect/tolerances.py` — `DOC_CLASS_TOLERANCE_OVERRIDES` layer with v1-default fallback; concrete entries for `equipment_spec` (tighter impedance + rated_power bands) and `relay_setting_sheet` (tighter fault_current band)
+- `src/interlock/detect/authority.py` — `DOC_CLASS_AUTHORITY` map for `transformer_params` + `relay_settings` families with v1-default fallback (`doc_a` authoritative when family or class is missing from the hierarchy, or when either class is `DocClass.unknown`)
+- `src/interlock/pipeline.py` — `classify_docs` kwarg (default `False`); `ReviewResult` extended with `doc_class_a` / `doc_class_b: DocClassification | None`; parallel classification via `ThreadPoolExecutor(max_workers=2)` overlapping with `ingest()`; classifier failure collapses to `unknown(0.0)` so pipeline keeps producing flags
+- `src/interlock/ui/app.py` — sidebar "Doc-class routing (v2 Sprint 1)" toggle (default ON); two-column doc-class banner above metrics row with confidence-graded styling (`st.success` ≥ 0.85, `st.info` 0.60–0.85, `st.warning` < 0.60); detected-indicators expander
+- 5 deterministic synthetic-fixture generators producing PDFs across `hvac_schedule`, `pid`, `bom`, `civil_drawing`, and a 2nd `equipment_spec` variant (motor data sheet)
+
+**Eval shipped:**
+- 11-doc partial acceptance corpus (6 existing real + 5 new synthetic) at `fixtures/eval/gold_doc_class.yaml` — full 20-doc target (with 9 more real sourced PDFs) is the immediate follow-up
+- Acceptance harness `scripts/run_doc_class_eval.py` (writes per-doc JSON + Markdown report)
+- CI gate at `tests/eval/test_doc_class_gate.py` enforcing overall ≥ 85 % / real ≥ 80 % / synthetic = 100 % / unknown precision = 100 % on the partial corpus (restore to 90 / 85 / 100 / 100 when corpus reaches 20)
+- Live-API smoke at `tests/real_world/test_doc_class_live.py` against 6 existing fixtures (~$0.40 per cold run)
+
+**Eval result on partial corpus:** **11/11 = 100 %** (5/5 synthetic, 5/5 real (4 fixtures + scanned), 1/1 unknown). All acceptance gates green.
+
+**Test surface delta:** +27 tests (7 schemas, 10 classifier mocked, 4 v2 pipeline + Track 1 snapshot, 5 tolerance per-class, 5 authority per-class, 6 gold YAML well-formed, 4 CI gate). Total v2 test count at `v2.0-mvp`: **292 passing + 8 live-API slow-marked**, deselected by default.
+
+**Cost delta:** Sprint 1 dev iteration spend ~$1.50 (live-API smoke twice + partial-corpus eval once, cached thereafter).
+
+**Honest scope statement.** See `docs/TDD.md` § "Known limits — Sprint 1 doc-class classifier (v2)" for what generalises vs what's overfit, and which 5 of 8 classes still inherit v1 behaviour end-to-end. The 11-doc partial corpus is acknowledged as smaller than the 20-doc spec target — the remaining 9 real PDFs are a sourcing exercise, not a code blocker.
+
 ## Phase 23 — Fork to interlock-ai-v2 + hybrid-pivot positioning (this repo's baseline)
 
 After v1's submission delivery (Phase 22), the v1 repo `funcpointer/interlock-ai` was frozen at `v1.5-mvp-ready`. This repo (`funcpointer/interlock-ai-v2`) carries forward the full v1 git history (every phase tag, every v1.x tag) and adds a `v2.0-baseline-from-v1.5-mvp-ready` tag at HEAD.

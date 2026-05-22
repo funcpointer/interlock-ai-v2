@@ -195,14 +195,62 @@ def active_tolerance_band(attribute_family: str) -> ToleranceBand:
     return TOLERANCE_TABLE.get(attribute_family, _DEFAULT_BAND)
 
 
-def classify(attribute_family: str, deviation_pct: float) -> Severity:
+# v2 Sprint 1: per-class tolerance overrides. Concrete entries for 3
+# classes; other 5 (and DocClass.unknown) inherit TOLERANCE_TABLE via
+# fallback chain. When the caller does not pass doc_class, behaviour
+# is bit-identical to v1.5-mvp-ready.
+from interlock.llm_pipeline.schemas.doc_class import DocClass  # noqa: E402
+
+DOC_CLASS_TOLERANCE_OVERRIDES: dict[DocClass, dict[str, ToleranceBand]] = {
+    DocClass.equipment_spec: {
+        "impedance_pct": ToleranceBand(
+            attribute_family="impedance_pct",
+            rel_tolerance_pct=5.0, rel_major_pct=15.0, rel_critical_pct=40.0,
+            source="IEEE C57.12.00-2015 §9.1 (tightened for nameplate)",
+        ),
+        "rated_power_kva": ToleranceBand(
+            attribute_family="rated_power_kva",
+            rel_tolerance_pct=2.5, rel_major_pct=7.5, rel_critical_pct=30.0,
+            source="IEEE C57.12.00-2015 §5.10 + NEMA TR 1 (tightened for nameplate)",
+        ),
+    },
+    DocClass.relay_setting_sheet: {
+        "fault_current_a": ToleranceBand(
+            attribute_family="fault_current_a",
+            rel_tolerance_pct=5.0, rel_major_pct=15.0, rel_critical_pct=40.0,
+            source="IEEE Std 242 (Buff Book) §10.5",
+        ),
+    },
+    DocClass.coordination_study: {
+        # Explicit empty entry so the routing path is audit-visible; falls
+        # through to TOLERANCE_TABLE for every family.
+    },
+}
+
+
+def classify(
+    attribute_family: str,
+    deviation_pct: float,
+    doc_class: DocClass | None = None,
+) -> Severity:
     """Bucket a relative deviation into a severity tier.
 
     deviation_pct is expected to be the output of ``relative_deviation``
-    (i.e. percent, where 50.0 means "half-magnitude difference"). Runtime
-    overrides (see ``set_tolerance_overrides``) win over shipped defaults.
+    (i.e. percent, where 50.0 means "half-magnitude difference").
+
+    When ``doc_class`` is provided and the class has an override in
+    ``DOC_CLASS_TOLERANCE_OVERRIDES`` for this family, the override band
+    wins. Falls back to runtime ``_OVERRIDES`` and TOLERANCE_TABLE for
+    DocClass.unknown, missing class entries, or doc_class=None — the
+    v1 default path.
     """
-    band = active_tolerance_band(attribute_family)
+    band: ToleranceBand | None = None
+    if doc_class is not None and doc_class != DocClass.unknown:
+        per_class = DOC_CLASS_TOLERANCE_OVERRIDES.get(doc_class)
+        if per_class is not None:
+            band = per_class.get(attribute_family)
+    if band is None:
+        band = active_tolerance_band(attribute_family)
     if deviation_pct >= band.rel_critical_pct:
         return "critical"
     if deviation_pct >= band.rel_major_pct:
