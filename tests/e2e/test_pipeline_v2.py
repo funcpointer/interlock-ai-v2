@@ -176,3 +176,64 @@ def test_snapshot_equivalence_use_llm_extraction_false() -> None:
     assert expected_params.issubset(surfaced), (
         f"Track 1 invariant broken: expected {expected_params}, got {surfaced}"
     )
+
+
+# --- Sprint 3: adjudicator pipeline integration --------------------------
+
+
+def test_v1_snapshot_equivalence_all_flags_are_rule_only() -> None:
+    """When both tracks off, every flag must be annotated 'rule_only' —
+    Sprint 3's promise that v1.5 snapshot equivalence still holds."""
+    from interlock.pipeline import review_two_documents_full
+
+    result = review_two_documents_full(
+        DOC_A, DOC_B,
+        embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+    )
+    assert result.flags, "expected non-zero baseline flags from Option 1 fixture"
+    for f in result.flags:
+        assert f.provenance == "rule_only", (
+            f"v1 snapshot broken: flag {f.parameter} got provenance "
+            f"{f.provenance!r}, expected 'rule_only'"
+        )
+
+
+def test_pipeline_annotates_provenance_when_llm_extraction_on(mocker) -> None:  # type: ignore[no-untyped-def]
+    """With LLM extraction enabled, the pipeline still produces a flag
+    list with provenance populated. (Specific labels depend on which
+    records the aligner pairs — verified in adjudicator unit tests.)"""
+    from interlock.pipeline import review_two_documents_full
+
+    fake = '{"claims":[],"page":1,"notes":""}'
+    mocker.patch(
+        "interlock.llm_pipeline.extract._call_claude_extract",
+        return_value=_fake_extract_response(fake),
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B,
+        embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=True,
+    )
+    for f in result.flags:
+        # The field must be one of the four enumerated values, never None.
+        assert f.provenance in {"rule_only", "llm_only", "mixed_track", "unknown"}
+
+
+def test_adjudicator_runs_unconditionally() -> None:
+    """Even with both tracks off — i.e. the v1.5 path — every flag should
+    have provenance set to something (not the default 'unknown')."""
+    from interlock.pipeline import review_two_documents_full
+
+    result = review_two_documents_full(
+        DOC_A, DOC_B,
+        embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+    )
+    for f in result.flags:
+        assert f.provenance != "unknown", (
+            "pipeline must annotate provenance for every flag"
+        )

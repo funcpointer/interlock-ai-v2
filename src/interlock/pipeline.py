@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from interlock.adjudicator import adjudicate_flags
 from interlock.align.claims import align_claims_exact
 from interlock.align.combiner import combine_alignments
 from interlock.align.exact import align_exact
@@ -195,6 +196,9 @@ def review_two_documents_full(
     _stage("detect", "start")
     flags = detect_flags(combined, suppress_info=suppress_info)
     _stage("detect", "done")
+
+    # v2 Sprint 3: annotate provenance. Pure function; zero cost; runs always.
+    flags = adjudicate_flags(flags)
 
     if use_llm_judge and flags:
         _stage("judge", "start")
