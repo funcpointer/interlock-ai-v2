@@ -3,7 +3,6 @@ is verified in tests/real_world/test_llm_extraction_live.py."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
