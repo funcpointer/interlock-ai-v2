@@ -32,7 +32,7 @@ from interlock.cache import disk as disk_cache
 from interlock.llm_pipeline.schemas.doc_class import DocClass, DocClassification
 
 MODEL = "claude-opus-4-7"
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"  # v2: structure-over-authorial-intent classification rule
 _DPI = 300
 _UNKNOWN_CONFIDENCE_THRESHOLD = 0.6
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "classify.md"
