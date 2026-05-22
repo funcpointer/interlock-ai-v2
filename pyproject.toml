@@ -25,6 +25,7 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
   "types-pyyaml",
+  "reportlab>=4.0",  # synthetic doc-class fixture generators (Sprint 1)
 ]
 
 [tool.ruff]
