@@ -916,6 +916,7 @@ if flags:
                         "doc_a_value": f.a_record.raw_value,
                         "doc_b_value": f.b_record.raw_value,
                         "provenance": getattr(f, "provenance", "unknown"),  # v2 Sprint 3
+                        "rerank_rationale": getattr(f, "rerank_rationale", None),  # v2 Sprint 4
                     }
                     st.rerun()
             with b_dismiss:
