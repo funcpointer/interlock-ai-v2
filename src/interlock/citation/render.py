@@ -32,15 +32,20 @@ def render_citation(record: ParameterRecord) -> Citation:
     try:
         page = doc[record.page - 1]
         rect = fitz.Rect(*record.bbox)
-        # Highlight the source bbox on the rendered page.
-        page.draw_rect(rect, color=(1, 0, 0), width=1.5, overlay=True)
-        # Clip to a generous window around the bbox so the snippet has context.
-        clip = fitz.Rect(
-            max(rect.x0 - _PAD, 0),
-            max(rect.y0 - _PAD, 0),
-            rect.x1 + _PAD * 4,  # extra horizontal context
-            rect.y1 + _PAD,
-        )
+        # v2 Sprint 2 fix: LLM-extracted records carry bbox=(0,0,0,0) —
+        # text-only LLM has no per-token coords. Detect zero-area bbox and
+        # render the whole page without highlight so the snippet shows real
+        # content instead of a blank 48×12 strip at the page top-left.
+        if rect.is_empty or rect.get_area() <= 0:
+            clip = page.rect
+        else:
+            page.draw_rect(rect, color=(1, 0, 0), width=1.5, overlay=True)
+            clip = fitz.Rect(
+                max(rect.x0 - _PAD, 0),
+                max(rect.y0 - _PAD, 0),
+                rect.x1 + _PAD * 4,  # extra horizontal context
+                rect.y1 + _PAD,
+            )
         pix = page.get_pixmap(clip=clip, dpi=_DPI)
         png = pix.tobytes("png")
     finally:

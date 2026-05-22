@@ -347,6 +347,20 @@ def _is_ocr_span(record: Any) -> bool:
     return bool(record.bbox[0] == 0 and record.bbox[1] == 0)
 
 
+def _whole_page_note(record: Any) -> str:
+    """Return the right reviewer-facing note when a record's bbox is
+    whole-page-at-origin. Distinguishes vision-OCR records from Sprint 2
+    LLM-extracted records (both end up with bbox starting at (0,0))."""
+    if not _is_ocr_span(record):
+        return ""
+    if getattr(record, "provenance", "regex") == "llm":
+        return (
+            " · 🤖 AI extraction (whole-page snippet — text-only LLM "
+            "has no per-record bbox)"
+        )
+    return " · 🔍 OCR (whole-page snippet — vision model has no per-word bbox)"
+
+
 def _locate_raw_value(text: str, raw: str) -> tuple[int, int]:
     """Return ``(start, end)`` of raw_value within text, or ``(-1, -1)``.
 
@@ -813,11 +827,7 @@ if flags:
                     if f.a_record.source_path
                     else Path(f.a_record.doc_id).name
                 ) or "doc_a"
-                ocr_note_a = (
-                    " · 🔍 OCR (whole-page snippet — vision model has no per-word bbox)"
-                    if _is_ocr_span(f.a_record)
-                    else ""
-                )
+                ocr_note_a = _whole_page_note(f.a_record)
                 st.markdown(
                     f"**Doc A (source of truth)**  \n"
                     f"`{doc_label}` · page {f.a_record.page} · "
@@ -837,11 +847,7 @@ if flags:
                     if f.b_record.source_path
                     else Path(f.b_record.doc_id).name
                 ) or "doc_b"
-                ocr_note_b = (
-                    " · 🔍 OCR (whole-page snippet — vision model has no per-word bbox)"
-                    if _is_ocr_span(f.b_record)
-                    else ""
-                )
+                ocr_note_b = _whole_page_note(f.b_record)
                 st.markdown(
                     f"**Doc B (deviation candidate)**  \n"
                     f"`{doc_label}` · page {f.b_record.page} · "
