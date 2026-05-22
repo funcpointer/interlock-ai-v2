@@ -1,0 +1,92 @@
+"""Sprint 4.5 — entity binding (y-range enclosure + nearest fallback) tests."""
+
+from __future__ import annotations
+
+from interlock.extract.parameters import ParameterRecord
+from interlock.llm_pipeline.schemas.entity import DetectedEntity
+
+
+def _record(name: str = "P", raw: str = "1 A", page: int = 1,
+            y_top: float = 0.0, y_bottom: float = 10.0,
+            entity_tag: str = "") -> ParameterRecord:
+    return ParameterRecord(
+        doc_id="d", page=page, bbox=(0.0, y_top, 100.0, y_bottom),
+        section=None, span_text=raw, name=name, raw_value=raw,
+        normalized_magnitude=1.0, normalized_unit="ampere",
+        entity_tag=entity_tag,
+    )
+
+
+def _entity(label: str, y_top: float, y_bottom: float, page: int = 1) -> DetectedEntity:
+    return DetectedEntity(
+        label=label, kind="equipment", y_top=y_top, y_bottom=y_bottom, page=page,
+    )
+
+
+def test_y_enclosure_binds_record_to_enclosing_entity() -> None:
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record(y_top=100, y_bottom=110)
+    ents = {1: [_entity("XFMR-001", y_top=80, y_bottom=130)]}
+    out = bind_records_to_entities([rec], ents)
+    assert out[0].entity_tag == "XFMR-001"
+
+
+def test_multiple_enclosing_entities_tightest_fit_wins() -> None:
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record(y_top=100, y_bottom=110)
+    ents = {1: [
+        _entity("OUTER", y_top=0, y_bottom=200),
+        _entity("INNER", y_top=90, y_bottom=120),
+    ]}
+    out = bind_records_to_entities([rec], ents)
+    assert out[0].entity_tag == "INNER"
+
+
+def test_no_enclosure_falls_back_to_nearest() -> None:
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record(y_top=100, y_bottom=110)
+    ents = {1: [
+        _entity("FAR", y_top=0, y_bottom=10),
+        _entity("NEAR", y_top=120, y_bottom=140),
+    ]}
+    out = bind_records_to_entities([rec], ents)
+    assert out[0].entity_tag == "NEAR"
+
+
+def test_no_entities_on_page_leaves_tag_empty() -> None:
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record()
+    out = bind_records_to_entities([rec], {})
+    assert out[0].entity_tag == ""
+
+
+def test_existing_entity_tag_is_preserved() -> None:
+    """Track 1 leading-row marker (e.g. circled digit) wins over spatial binding."""
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record(entity_tag="6")
+    ents = {1: [_entity("XFMR-001", y_top=0, y_bottom=200)]}
+    out = bind_records_to_entities([rec], ents)
+    assert out[0].entity_tag == "6"
+
+
+def test_empty_record_list_returns_empty() -> None:
+    from interlock.extract.entity_bind import bind_records_to_entities
+    assert bind_records_to_entities([], {1: [_entity("X", 0, 10)]}) == []
+
+
+def test_page_mismatch_ignored() -> None:
+    """Record on page 2 should not bind to entities on page 3."""
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record(page=2)
+    ents = {3: [_entity("X", y_top=0, y_bottom=10, page=3)]}
+    out = bind_records_to_entities([rec], ents)
+    assert out[0].entity_tag == ""
+
+
+def test_returns_new_records_does_not_mutate() -> None:
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record(y_top=100, y_bottom=110)
+    ents = {1: [_entity("XFMR-001", y_top=80, y_bottom=130)]}
+    out = bind_records_to_entities([rec], ents)
+    assert rec.entity_tag == ""
+    assert out[0].entity_tag == "XFMR-001"
