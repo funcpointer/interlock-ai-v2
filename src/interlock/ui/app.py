@@ -729,10 +729,12 @@ if flags:
         pairing_conf = getattr(f, "pairing_confidence", 1.0)
         weak_pair = pairing_conf < 0.75
         pair_badge = " · ⚠️ weak pair" if weak_pair else ""
+        # v2 Sprint 3: silent on rule_only, prominent on llm_only / mixed_track
+        prov_badge = _provenance_badge(getattr(f, "provenance", "unknown"))
         header = (
             f"{_SEVERITY[sev]['emoji']} **{f.parameter}** · "
             f"{dev_str} · confidence {f.confidence:.2f}"
-            f"{pair_badge}{verdict_badge}"
+            f"{pair_badge}{prov_badge}{verdict_badge}"
         )
 
         with st.expander(
@@ -752,6 +754,21 @@ if flags:
                     "value-equality or low-similarity fallback) — verify "
                     "these two records describe the same physical device "
                     "before acting"
+                )
+            # v2 Sprint 3: per-flag track detail (silent on rule_only/unknown)
+            prov = getattr(f, "provenance", "unknown")
+            if prov == "llm_only":
+                cap += (
+                    " · Track provenance: 🧠 AI-only — both sides extracted "
+                    "by the LLM layer (Sprint 2)"
+                )
+            elif prov == "mixed_track":
+                a_prov_human = "Rules" if f.a_record.provenance == "regex" else "AI"
+                b_prov_human = "Rules" if f.b_record.provenance == "regex" else "AI"
+                cap += (
+                    f" · Track provenance: 🔀 Hybrid — Doc A={a_prov_human} · "
+                    f"Doc B={b_prov_human}. Verify these two records describe "
+                    f"the same physical parameter."
                 )
             st.caption(cap)
 
