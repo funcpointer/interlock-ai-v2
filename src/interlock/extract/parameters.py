@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from interlock.extract.units import normalize_quantity
 from interlock.ingest.text import Span
@@ -45,6 +45,11 @@ class ParameterRecord:
     # digits → "1".."20"; uppercase otherwise) so "⑥" in Doc A matches
     # "6." in Doc B.
     entity_tag: str = ""
+    # v2 Sprint 2: which track emitted this record. Default "regex"
+    # preserves bit-identity for every existing caller; the LLM extractor
+    # (Track 2) sets it to "llm" at downcast time. Adjudicator (Sprint 3)
+    # uses this for per-flag provenance UX.
+    provenance: Literal["regex", "llm"] = "regex"
 
 
 class _Pattern(NamedTuple):
