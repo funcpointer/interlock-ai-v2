@@ -1,29 +1,34 @@
 {
   "summary": {
-    "total_docs": 11,
+    "total_docs": 16,
     "overall_accuracy": 1.0,
     "real_accuracy": 1.0,
     "synthetic_accuracy": 1.0,
     "unknown_precision": 1.0,
     "per_class": {
       "coordination_study": {
+        "total": 4,
+        "correct": 4,
+        "recall": 1.0
+      },
+      "equipment_spec": {
         "total": 3,
         "correct": 3,
         "recall": 1.0
       },
-      "equipment_spec": {
+      "relay_setting_sheet": {
+        "total": 1,
+        "correct": 1,
+        "recall": 1.0
+      },
+      "hvac_schedule": {
         "total": 2,
         "correct": 2,
         "recall": 1.0
       },
-      "hvac_schedule": {
-        "total": 1,
-        "correct": 1,
-        "recall": 1.0
-      },
       "pid": {
-        "total": 1,
-        "correct": 1,
+        "total": 2,
+        "correct": 2,
         "recall": 1.0
       },
       "bom": {
@@ -43,7 +48,7 @@
       }
     },
     "acceptance_thresholds": {
-      "overall_accuracy_min": 0.85,
+      "overall_accuracy_min": 0.9,
       "real_only_accuracy_min": 0.8,
       "synthetic_only_accuracy_min": 1.0,
       "unknown_precision_min": 1.0
@@ -63,12 +68,12 @@
       "confidence": 0.93,
       "match": true,
       "source": "real",
-      "reasoning": "The document is a Bussmann-style selective coordination study guide containing a one-line diagram with protective device callouts (KRP-C-1600SP, LPS-RK-200SP, LPS-RK-400SP, JCN80E fuses), transformer/fuse pairs, fault current annotations, and procedural guidance for conducting coordination analyses. Per the classification principle, vendor/sample coordination material with these structural signals classifies as coordination_study.",
+      "reasoning": "The document is a Bussmann-style guide on conducting a selective coordination study, including a one-line diagram (Figure 11) with protective-device callouts (KRP-C-1600SP, LPS-RK-200SP, JCN80E fuses), transformer ratings with impedance, fault current annotations, and motor branch details. Per the classification principle, vendor samples/training material with these structural signals classify as coordination_study.",
       "detected_indicators": [
-        "One-line diagram with fuse callouts (LOW-PEAK KRP-C-1600SP, LPS-RK-200SP, LPS-RK-400SP, LPN-RK-500SP, JCN80E)",
-        "Transformer + fuse pairs (1000KVA \u0394-Y 480/277V with 5.75% Z, 150KVA \u0394-Y 208/120V with 2% Z)",
-        "Fault current annotation (Fault X1 20,000A RMS Sym) and motor branch with FLA",
-        "Procedural text discussing TCC curves on log-log paper, ampere-scale selection, and selectivity guide"
+        "one-line diagram with fuse callouts (LOW-PEAK KRP-C-1600SP, LPS-RK-400SP)",
+        "transformer + fuse pair analysis (1000KVA \u0394-Y, 5.75%Z with JCN80E)",
+        "fault current annotation (Fault X1 20,000A RMS Sym)",
+        "procedural text for selective coordination study"
       ],
       "notes": "Eaton sample coordination study; TCC curves on multiple pages"
     },
@@ -76,17 +81,49 @@
       "path": "fixtures/pdfs/doc_b_90pct.pdf",
       "expected": "coordination_study",
       "actual": "coordination_study",
-      "confidence": 0.92,
+      "confidence": 0.93,
       "match": true,
       "source": "real",
-      "reasoning": "The pages describe procedures for a selective coordination study and include a one-line diagram with protective device callouts (KRP-C-1600SP, LPS-RK-200SP, JCN80E fuses, overcurrent relay, transformer with impedance, motor branch with FLA). This matches the coordination_study class per the structure-over-intent principle, even though it's a Bussmann training/reference bulletin.",
+      "reasoning": "The document is a Bussmann-style selective coordination study guide containing a one-line diagram with protective device callouts (fuses, breakers, relay), transformer parameters, fault current annotations, and discussion of TCC curve plotting. Per the classification principle, vendor samples/training material with these structural signals classify as coordination_study.",
       "detected_indicators": [
-        "One-line diagram with fuse callouts (LOW-PEAK KRP-C-1600SP, LPS-RK-400SP, LPN-RK-500SP)",
-        "Transformer + fuse pairs (1000KVA \u0394-Y, 5.75% Z with JCN80E primary fuse)",
-        "Fault point X1 with 200,000A RMS Sym for selective coordination analysis",
-        "Discussion of TCC log-log curves, ampere scale, reference voltage for coordination"
+        "One-line diagram with fuse callouts (LPS-RK-200SP, KRP-C-1600SP, JCN80E)",
+        "Transformer + fuse pairing (1000KVA \u0394-Y, 5.75% Z) with overcurrent relay",
+        "Fault X1 200,000A RMS Sym annotation",
+        "Selective Coordination Study procedural text referencing log-log paper and TCC curves"
       ],
       "notes": "Mutated derivative of doc_a_60pct; same coordination-study shape"
+    },
+    {
+      "path": "fixtures/pdfs/doc_a_scanned.pdf",
+      "expected": "coordination_study",
+      "actual": "coordination_study",
+      "confidence": 0.94,
+      "match": true,
+      "source": "real",
+      "reasoning": "The document is a Bussmann selective coordination study guide containing recommended procedures for coordination analysis and an example one-line diagram with protective device callouts (fuses LPS-RK-200SP, KRP-C-1600SP, JCN80E, overcurrent relay) paired with transformers and motor branches. Per the classification principle, vendor sample/training material with these structural signals classifies as coordination_study.",
+      "detected_indicators": [
+        "One-line diagram with fuse callouts (LOW-PEAK LPS-RK-200SP, KRP-C-1600SP, JCN80E)",
+        "Transformer + fuse pairs analyzed for selectivity (1000kVA, 150kVA with primary/secondary fuses)",
+        "Overcurrent relay and motor branch with protective device coordination",
+        "Section titles: 'Selective Coordination Study \u2013 Recommended Procedures' and 'Examples of Selective Coordination Studies'"
+      ],
+      "notes": "JPEG-encoded raster of doc_a_60pct; classifier reads page images directly"
+    },
+    {
+      "path": "fixtures/pdfs/synth_coordination_study_v2.pdf",
+      "expected": "coordination_study",
+      "actual": "coordination_study",
+      "confidence": 0.95,
+      "match": true,
+      "source": "synthetic",
+      "reasoning": "Document is titled 'Selective Coordination Study \u2014 TCC1' and contains the structural signals of a coordination study: a device list including primary fuse, secondary main fuse, feeder fuse, branch breaker, and MV relays with curve types (U2 IEC VI) and time-dial settings, plus a TCC reference-points table with pickup currents, time-at-pickup, and asymptote values for log-log plotting.",
+      "detected_indicators": [
+        "log-log time-current characteristic curve references",
+        "fuse/breaker/relay device table with ratings and curve/TD columns",
+        "pickup + time + asymptote reference-point table",
+        "IEEE 242 Buff Book and Bussmann Coordination Bulletin references"
+      ],
+      "notes": "Schneider-style sample coord study; TCC1 with 8-row device table"
     },
     {
       "path": "fixtures/pdfs/spec_xfmr_001.pdf",
@@ -95,11 +132,11 @@
       "confidence": 0.97,
       "match": true,
       "source": "synthetic",
-      "reasoning": "The document is an Equipment Data Sheet for a power transformer with a nameplate parameter table including rated kVA, primary/secondary voltage, impedance %, frequency, BIL, vector group, cooling class, and insulation class. It explicitly references IEEE C57.12.00 and ANSI C57.12.10 standards and lists a manufacturer.",
+      "reasoning": "The document is an Equipment Data Sheet for a power transformer with a nameplate parameter table including rated kVA, primary/secondary voltages, impedance %, frequency, BIL, vector group, cooling class, and insulation class. It references IEEE C57.12.00 and ANSI C57.12.10 standards and includes manufacturer information, matching the equipment_spec class exactly.",
       "detected_indicators": [
-        "Nameplate parameter table (1100 kVA, 12.47 kV / 480 V, 4.5% impedance, 95 kV BIL, Dyn1)",
-        "IEEE C57.12.00 / ANSI C57.12.10 standard reference",
-        "Manufacturer block (ACME Power Equipment Co.)"
+        "Nameplate parameters (1100 kVA, 12.47 kV / 480 V, 4.5% impedance, 60 Hz, 95 kV BIL)",
+        "IEEE C57.12.00 / ANSI C57.12.10 standard references",
+        "Manufacturer block (ACME Power Equipment Co.) and Equipment ID XFMR-001"
       ],
       "notes": "IEEE C57.12.00 nameplate format (existing synthetic from v1)"
     },
@@ -110,13 +147,45 @@
       "confidence": 0.98,
       "match": true,
       "source": "synthetic",
-      "reasoning": "The document is titled 'MOTOR EQUIPMENT DATA SHEET' and contains a nameplate parameter table with manufacturer (ABB), model, serial number, and standardized motor parameters (rated power, voltage, current, speed, frequency, insulation class, efficiency, etc.). It references NEMA MG1 / IEC 60034 standards, matching equipment_spec conventions.",
+      "reasoning": "Document is titled 'Motor Equipment Data Sheet' with manufacturer (ABB), model (M3BP 280SMB 4), serial number, and a nameplate parameter table listing rated power, voltage, current, speed, frequency, insulation class, etc. Standards compliance references NEMA MG 1, IEC 60034, and IEEE 841 \u2014 classic equipment spec layout.",
       "detected_indicators": [
-        "Manufacturer/Model/Serial block (ABB M3BP 280SMB 4, AB1234567)",
-        "Nameplate parameter table (rated kW, V, A, RPM, Hz, insulation class F)",
-        "NEMA MG 1-2016 / IEC 60034-1 standards compliance reference"
+        "manufacturer/model/serial block",
+        "nameplate parameter table (rated kW, V, A, RPM, Hz)",
+        "insulation class F / temperature rise",
+        "NEMA MG1 / IEC 60034 standards references"
       ],
-      "notes": "Motor data sheet; second equipment_spec variant"
+      "notes": "Motor data sheet; ABB M3BP 75 kW; NEMA MG1 / IEC 60034"
+    },
+    {
+      "path": "fixtures/pdfs/synth_equipment_spec_v3.pdf",
+      "expected": "equipment_spec",
+      "actual": "equipment_spec",
+      "confidence": 0.97,
+      "match": true,
+      "source": "synthetic",
+      "reasoning": "The document is a switchgear data sheet with manufacturer/model/serial block (Eaton VacClad-W, VCP-W-1600, SG10243) and a nameplate parameter table listing rated voltage, current, BIL, short-circuit ratings, and references IEEE C37.20.2 / ANSI C37.06 / IEC 62271-200 standards.",
+      "detected_indicators": [
+        "Manufacturer/model/serial block (Eaton VacClad-W, VCP-W-1600, SG10243)",
+        "Nameplate parameter table (Rated Maximum Voltage 15 kV, BIL 95 kV, 40 kA short-circuit, etc.)",
+        "IEEE C37 / ANSI / IEC standards references"
+      ],
+      "notes": "MV switchgear data sheet; Eaton VCP-W-1600; IEEE C37.20.2"
+    },
+    {
+      "path": "fixtures/pdfs/synth_relay_setting_sheet.pdf",
+      "expected": "relay_setting_sheet",
+      "actual": "relay_setting_sheet",
+      "confidence": 0.98,
+      "match": true,
+      "source": "synthetic",
+      "reasoning": "Document is titled 'Relay Setting Sheet \u2014 Transformer Protection' and contains a concrete setting table with relay model SEL-787, ANSI device numbers (87T, 51P, 50N, etc.), numeric pickup values, time dial settings, curve types (U2 IEC VI), and a trip target logic block.",
+      "detected_indicators": [
+        "SEL-787 relay model identifier",
+        "Setting table with pickup/time-dial/curve columns",
+        "Trip target logic equations (TRIP1 = 87T + 87HS)",
+        "ANSI device numbers (87T, 51P, 51N, 27P, 59P, 81U/O)"
+      ],
+      "notes": "SEL-787 transformer protection setting sheet; concrete setting tables"
     },
     {
       "path": "fixtures/pdfs/synth_hvac_schedule.pdf",
@@ -125,14 +194,31 @@
       "confidence": 0.98,
       "match": true,
       "source": "synthetic",
-      "reasoning": "The document is titled 'HVAC EQUIPMENT SCHEDULE' and contains a tabular schedule with equipment tags (AHU-1, FCU-1, RTU-1, EF-1, etc.), Type, Location, CFM, Tonnage, GPM, and ASHRAE reference columns \u2014 exactly matching the hvac_schedule signal set.",
+      "reasoning": "Page is titled 'HVAC EQUIPMENT SCHEDULE' and contains a tabular schedule with equipment tags (AHU-1, FCU-1, RTU-1, EF-1, CHWP-1, CT-1), CFM, Tonnage, GPM, and ASHRAE reference columns \u2014 matching hvac_schedule signals exactly.",
       "detected_indicators": [
-        "Equipment tag IDs (AHU-1, FCU-1, RTU-1, EF-1, CHWP-1, CT-1)",
-        "CFM/Tonnage/GPM columns",
+        "Equipment tags AHU-1, FCU-1/2/3, RTU-1, EF-1/2, CHWP-1, CT-1",
+        "CFM / Tonnage / GPM columns",
         "ASHRAE Ref column (90.1-2019, 62.1-2019)",
         "Mechanical room and Roof Top location callouts"
       ],
       "notes": "AHU / FCU / RTU / EF tabular schedule with ASHRAE refs"
+    },
+    {
+      "path": "fixtures/pdfs/synth_hvac_schedule_v2.pdf",
+      "expected": "hvac_schedule",
+      "actual": "hvac_schedule",
+      "confidence": 0.98,
+      "match": true,
+      "source": "synthetic",
+      "reasoning": "The document is titled 'Mechanical Equipment Schedule \u2014 Central Plant' and contains a dense tabular schedule of HVAC equipment (chillers, boilers, pumps, cooling towers, expansion tank) with tag IDs, GPM, tonnage, EWT/LWT, and kW columns, referencing ASHRAE 90.1-2019.",
+      "detected_indicators": [
+        "equipment tag IDs (CH-1, CHWP-1, CT-1, HWP-1)",
+        "GPM and tonnage columns",
+        "EWT/LWT temperature columns",
+        "ASHRAE 90.1-2019 reference",
+        "tabular HVAC schedule layout"
+      ],
+      "notes": "Central plant: chillers / boilers / pumps / cooling tower per ASHRAE 90.1"
     },
     {
       "path": "fixtures/pdfs/synth_pid.pdf",
@@ -141,13 +227,29 @@
       "confidence": 0.97,
       "match": true,
       "source": "synthetic",
-      "reasoning": "The document is explicitly titled 'Piping & Instrumentation Diagram' and shows ISA-5.1 instrument bubbles (PT-100, FT-101, TIC-200, LIC-200, PIC-300, FV-300), process equipment blocks (feed tank, reactor, heat exchanger, storage), flow-direction arrows, and line codes with size/service/material (e.g., 4\"-FS-101-CS).",
+      "reasoning": "Document is explicitly titled 'Piping & Instrumentation Diagram' with ISA-5.1 notation. Contains ISA instrument bubbles (PT-100, FT-101, TIC-200, LIC-200, PIC-300, FV-300), equipment blocks (T-101, R-201, E-301, TK-401), flow arrows, and process line codes (4\"-FS-101-CS, 6\"-PR-201-SS).",
       "detected_indicators": [
         "ISA-5.1 instrument bubbles (PT-100, TIC-200, PIC-300)",
-        "process line codes with size/service/material (4\"-FS-101-CS, 6\"-PR-201-SS)",
-        "flow-direction arrows between equipment blocks"
+        "process line codes with size/service/material (4\"-FS-101-CS)",
+        "equipment tags and flow-direction arrows between vessels"
       ],
       "notes": "ISA-5.1 instrument bubbles; reactor feed process"
+    },
+    {
+      "path": "fixtures/pdfs/synth_pid_v2.pdf",
+      "expected": "pid",
+      "actual": "pid",
+      "confidence": 0.97,
+      "match": true,
+      "source": "synthetic",
+      "reasoning": "The document is explicitly titled 'Piping & Instrumentation Diagram' and shows ISA-5.1 instrument bubbles (PT-101, TIC-201, PSV-301, FIC-401, FT-302, MOV-220), equipment blocks (FILTER, HX-A, COOLER, PUMP), and process line tags with size/service/material codes (6\"-PR-101-CS).",
+      "detected_indicators": [
+        "ISA-5.1 instrument bubbles (PT-101, TIC-201, PSV-301)",
+        "Line tags with size/service/material (6\"-PR-201-SS)",
+        "Equipment blocks connected by process lines",
+        "Title explicitly states P&ID"
+      ],
+      "notes": "Parallel heat-exchanger train with safety interlocks + bypass loops"
     },
     {
       "path": "fixtures/pdfs/synth_bom.pdf",
@@ -156,12 +258,12 @@
       "confidence": 0.98,
       "match": true,
       "source": "synthetic",
-      "reasoning": "The document is explicitly titled 'BILL OF MATERIAL \u2014 SWITCHGEAR ASSEMBLY' and contains a tabular line-item list with Item #, Qty, Description, Manufacturer, Part Number, and Vendor Cat # columns. It includes revision info ('Rev B') and a total line item count, matching BOM structural signals exactly.",
+      "reasoning": "Document is explicitly titled 'BILL OF MATERIAL' with a tabular line-item list including Item #, Qty, Description, Manufacturer, Part Number, and Vendor Cat # columns, plus a revision/approval block.",
       "detected_indicators": [
         "'BILL OF MATERIAL' title",
-        "tabular columns: Item #, Qty, Description, Manufacturer, Part Number, Vendor Cat #",
-        "Drawing/Revision block (E-104 Rev B)",
-        "Total line items count and approval signature"
+        "Item #/Qty/Description/Manufacturer/Part Number/Vendor Cat # columns",
+        "Revision B and approval signature block",
+        "Drawing reference E-104"
       ],
       "notes": "Switchgear assembly BOM with manufacturer + part numbers"
     },
@@ -172,14 +274,13 @@
       "confidence": 0.97,
       "match": true,
       "source": "synthetic",
-      "reasoning": "The document is a site grading plan with contour lines, Northing/Easting survey coordinates, foundation pad callouts, and civil-specific abbreviations (TOC, BOC, IE, FFE). Title block references a civil engineer's P.E. stamp and drawing number C-101.",
+      "reasoning": "The document is titled 'SITE GRADING PLAN \u2014 SUBSTATION FOUNDATION' with civil drawing number C-101, scale 1\"=20', and a P.E. stamp reference. It contains contour lines, Northing/Easting survey coordinates, and civil callouts (TOC, BOC, IE, FFE) explicitly defined in the legend.",
       "detected_indicators": [
-        "contour rings with 0.5 ft interval",
+        "concentric contour lines with 0.5 ft interval",
         "Northing/Easting grid (N 2100-2460, E 1080-1680)",
-        "TOC/BOC/IE/FFE callouts",
-        "transformer pad foundation detail",
-        "civil engineer P.E. stamp reference",
-        "NAVD 88 vertical datum"
+        "TOC/BOC/IE/FFE elevation callouts",
+        "civil title block with P.E. stamp",
+        "NAVD 88 vertical datum / state plane horizontal datum"
       ],
       "notes": "Grading plan with survey grid + contours + civil callouts"
     },
@@ -190,11 +291,11 @@
       "confidence": 0.95,
       "match": true,
       "source": "real",
-      "reasoning": "This is a prose-heavy conference paper with title page, Abstract, Introduction, Conclusions, References, and Biography sections. It discusses transformer differential relay modeling concepts but contains no concrete setting tables, TCC curves, nameplate parameter tables, or schedules.",
+      "reasoning": "This is a prose-heavy conference paper with title page, abstract, introduction, conclusions, references, and biography sections. It discusses transformer differential relay protection concepts but contains no concrete setting tables, TCC curves, nameplate parameter tables, or schedules in the visible pages.",
       "detected_indicators": [
-        "Conference paper title page (Georgia Tech Protective Relaying Conference, 1999)",
-        "Abstract/Introduction/Conclusions/References/Biography section structure",
-        "Prose discussion of relay algorithms without setting tables or TCC plots"
+        "Abstract/Introduction/Conclusions/References/Biography structure",
+        "Conference paper presented at Georgia Tech Protective Relaying Conference",
+        "Prose discussion of relay model concepts without concrete setting tables or TCC plots"
       ],
       "notes": "SEL conference paper \u2014 prose-heavy w/ abstract/intro/conclusions; no setting tables"
     },
@@ -205,30 +306,14 @@
       "confidence": 0.9,
       "match": true,
       "source": "real",
-      "reasoning": "This is a tutorial/seminar presentation titled 'Preparation of Transformer Specifications' presented at an IEEE seminar. The visible pages show a title page, an objectives list (prose bullet points about how to write specifications), and a contact page \u2014 no nameplate parameter tables, TCC curves, or setting tables are present. It is a guide about writing specifications, not an actual equipment spec deliverable.",
+      "reasoning": "This is a tutorial/seminar presentation about how to prepare transformer specifications, presented at an IEEE PES/IAS seminar. The pages shown contain a title page, an objectives list (prose bullets about specification-writing goals), and a contact page \u2014 no nameplate parameter tables, no TCC curves, no relay settings, no schedules.",
       "detected_indicators": [
-        "IEEE seminar presentation title page",
-        "prose bullet-point objectives list discussing specification preparation",
-        "no nameplate parameter tables or technical schedules visible",
-        "contact info closing page typical of tutorial material"
+        "Title 'PREPARATION OF TRANSFORMER SPECIFICATIONS' presented at IEEE seminar",
+        "Objectives page with prose bullets about writing specifications, tendering, design review",
+        "No nameplate parameter tables or numeric equipment data visible",
+        "Tutorial/guide structure rather than deliverable spec sheet"
       ],
       "notes": "IEEE Guide for transformer specification \u2014 standards-text guide, not a deliverable"
-    },
-    {
-      "path": "fixtures/pdfs/doc_a_scanned.pdf",
-      "expected": "coordination_study",
-      "actual": "coordination_study",
-      "confidence": 0.94,
-      "match": true,
-      "source": "real",
-      "reasoning": "The document is a Bussmann-style selective coordination study guide containing a procedural methodology for coordination analysis and a sample one-line diagram with protective-device callouts (fuses, relay, transformer with %Z, motor branch). Per the structure-over-intent rule, vendor sample/training material with these signals classifies as coordination_study.",
-      "detected_indicators": [
-        "Section titled 'Selective Coordination Study \u2013 Recommended Procedures'",
-        "One-line diagram with fuse callouts (KRP-C-1600SP, LPS-RK-200SP, JCN80E) and overcurrent relay",
-        "Transformer with %Z, fault current annotation (20,000A RMS Sym), and motor branch with FLA",
-        "Discussion of TCC curves on log-log paper and fuse selectivity"
-      ],
-      "notes": "JPEG-encoded raster of doc_a_60pct; classifier reads page images directly"
     }
   ]
 }
