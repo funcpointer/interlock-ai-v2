@@ -46,11 +46,14 @@ def _fake_response(text: str) -> MagicMock:
     return MagicMock(content=[content])
 
 
-def test_call_claude_extract_constructs_text_only_message(mocker) -> None:  # type: ignore[no-untyped-def]
+def test_call_claude_extract_constructs_text_only_message(mocker, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """The call must send NO image content (text-only) and include the
     composed prompt + the page text."""
     from interlock.llm_pipeline.extract import _call_claude_extract
 
+    # Production code reads ANTHROPIC_API_KEY at client construction;
+    # the SDK is mocked but Python still evaluates the kwarg expression.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     fake_resp = _fake_response('{"claims":[],"page":1,"notes":""}')
     create = mocker.patch("interlock.llm_pipeline.extract.Anthropic")
     create.return_value.messages.create.return_value = fake_resp
