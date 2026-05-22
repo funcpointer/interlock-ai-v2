@@ -856,6 +856,7 @@ if flags:
                         "doc_b_page": f.b_record.page,
                         "doc_a_value": f.a_record.raw_value,
                         "doc_b_value": f.b_record.raw_value,
+                        "provenance": getattr(f, "provenance", "unknown"),  # v2 Sprint 3
                     }
                     st.rerun()
             with b_dismiss:
