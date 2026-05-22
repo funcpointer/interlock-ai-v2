@@ -168,6 +168,22 @@ The classifier ships behind `classify_docs=True` (default ON in UI; default OFF 
 4. Sprint 5 — Standards-as-RAG replaces `DOC_CLASS_AUTHORITY` const with per-project precedence-ladder loading; coupled-effect graph traversal lands
 5. Continuous — corpus growth via reviewer accept/dismiss signals; per-class recall reported on every CI run
 
+## Known limits — Sprint 3 adjudicator + provenance UX (v2)
+
+The adjudicator ships as a pure post-processing layer that runs unconditionally after `detect_flags()`. The `Flag.provenance` field defaults to `"unknown"` for hand-constructed flags so the 333-test v1 invariant stayed green during introduction. When both tracks are off (the `v1.5-mvp-ready` path), every flag is annotated `rule_only` — surfaced via a CI-gated snapshot-equivalence test.
+
+**Architecture that generalises:**
+- 3-state provenance taxonomy + `unknown` default (back-compat-safe)
+- Pure post-processing adjudicator (zero cost, trivially testable)
+- Silent-default + prominent-exception badge pattern (reviewer's eye drawn to exceptions only)
+- Additive schema evolution (`ALTER TABLE ... ADD COLUMN ... DEFAULT ...`) via Python-side guarded migration
+
+**Heuristics + scope deliberately limited in Sprint 3:**
+- Does NOT detect "both tracks independently agreed" (`both` label). Phase 19's alignment gates suppress duplicate records before they reach the flag layer, so an organic "both" never forms. Detecting it requires running alignment twice or matching duplicate flags across runs — deferred to Sprint 4+ pairing-reranker work where the duplicate-pair problem is already on the table.
+- `mixed_track` flags can occur for two reasons: (1) one track found one side of the comparison and the other track found the other side, or (2) the same fact exists in both tracks but alignment picked one record from each track to form the pair. Sprint 3 doesn't distinguish these — the badge is "look closer" either way.
+- Sidebar filter narrows the *visible* flag list but doesn't change what's computed. Reviewer can switch back to "All" any time without re-running the pipeline.
+- Per-flag detail line uses "Rules" / "AI" as the reviewer-facing labels for `regex` / `llm`. Internal taxonomy stays unexposed.
+
 ## Open questions + future work
 
 - **Entity fingerprinting** (BACKLOG R-F): binding an implicit equipment in one doc to a tagged equipment on the other via attribute fingerprint. Required for cross-doc multi-equipment demos.

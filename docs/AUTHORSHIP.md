@@ -122,6 +122,25 @@ Shipped via 7 phase tags (`phase-24.1-classifier-schemas` → `phase-24.7-classi
 
 **Honest scope statement.** See `docs/TDD.md` § "Known limits — Sprint 1 doc-class classifier (v2)" for what generalises vs what's overfit, and which 5 of 8 classes still inherit v1 behaviour end-to-end. The 11-doc partial corpus is acknowledged as smaller than the 20-doc spec target — the remaining 9 real PDFs are a sourcing exercise, not a code blocker.
 
+## Sprint 3 (v2) — Adjudicator + Provenance UX
+
+Shipped via 5 phase tags (`phase-26.1-flag-provenance-field` → `phase-26.5-adjudicator-schema`) on top of `v2.1-llm-extraction`. Exit tag: `v2.2-adjudicator`.
+
+**Components landed:**
+- `src/interlock/detect/mismatch.py` — `Flag` gains `provenance: Literal["rule_only", "llm_only", "mixed_track", "unknown"] = "unknown"`
+- `src/interlock/adjudicator.py` — `adjudicate_flags()` pure post-processing function + `_classify_provenance()` taxonomy logic
+- `src/interlock/pipeline.py` — adjudicator wired after `detect_flags()`; runs always (pure annotation, zero cost)
+- `src/interlock/ui/app.py` — sidebar track-filter radio (All / Deterministic only / AI-only / Hybrid sources); provenance badge in flag header (silent on `rule_only`, prominent `🧠 AI-only` / `🔀 Hybrid sources` on exceptions); per-flag expanded view shows track detail only on non-default; JSON export gains `provenance` key per accepted flag
+- `src/interlock/store/sqlite.py` + `data/interlock.schema.sql` — decision table gains `provenance` column via idempotent Python-side migration (sqlite3 doesn't support `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`; we PRAGMA-check then ALTER as needed). New public `apply_schema(conn)` consolidates schema + migration so tests can target a fresh in-memory DB without going through `_connect()`.
+
+**UX revised twice during brainstorming.** Final design uses the silent-default + prominent-exception pattern (mirrors Phase 19's `⚠️ weak pair` badge). Internal "Track 1 / Track 2" terminology never leaks to reviewer-facing labels.
+
+**Cost delta:** $0 dev spend, $0 per-review delta. Sprint 3 is the cheapest sprint of the v2 plan.
+
+**Test surface delta:** +21 tests (4 Flag field + 10 adjudicator unit + 3 pipeline integration + 4 SQLite schema). Total v2 test count at `v2.2-adjudicator`: **354 passing** + the existing live-API slow-marked suites.
+
+**Honest scope statement.** Sprint 3 ships the labeling. It does NOT detect "both tracks independently agreed on the same fact" — that case requires running alignment twice or detecting duplicate records, both deferred to Sprint 4+. The 3-state taxonomy (`rule_only` / `llm_only` / `mixed_track`) reflects what the pipeline's union-merge architecture actually produces.
+
 ## Phase 23 — Fork to interlock-ai-v2 + hybrid-pivot positioning (this repo's baseline)
 
 After v1's submission delivery (Phase 22), the v1 repo `funcpointer/interlock-ai` was frozen at `v1.5-mvp-ready`. This repo (`funcpointer/interlock-ai-v2`) carries forward the full v1 git history (every phase tag, every v1.x tag) and adds a `v2.0-baseline-from-v1.5-mvp-ready` tag at HEAD.
