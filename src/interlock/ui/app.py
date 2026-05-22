@@ -232,6 +232,19 @@ with st.sidebar:
         ),
     )
 
+    use_llm_reranker = st.toggle(
+        "Track 2 LLM pairing reranker (v2 Sprint 4)",
+        value=False,
+        help=(
+            "When a pair has low Track 1 pairing_confidence (< 0.75), send "
+            "both records' context to Claude Sonnet 4.5. The reranker scores "
+            "the pair, writes a one-paragraph rationale, and may decline to "
+            "pair (drops the candidate flag). Replaces the generic "
+            "⚠️ weak pair badge with reasoned verdicts.\n\n"
+            "Cost: ~$0.005 per weak pair, diskcached per (record, record)."
+        ),
+    )
+
     st.divider()
 
     # --- Display filter ---------------------------------------------------
@@ -449,10 +462,14 @@ if run:
         "ingest_b": "Ingesting Doc B (PyMuPDF spans + Camelot tables)",
         "extract": "Extracting parameters (regex patterns + Pint unit normalisation)",
         "align": "Aligning across documents (exact name + canonical glossary + Voyage embeddings)",
+        "rerank": "Reranking weak Track 1 pairs (Claude Sonnet 4.5, parallel × 5, cached)",
         "detect": "Detecting mismatches + classifying severity (IEEE / IEC tolerance bands)",
         "judge": "LLM significance judgement (Claude, cached per flag)",
     }
-    _STAGE_ORDER: list[str] = ["ingest_a", "ingest_b", "extract", "align", "detect"]
+    _STAGE_ORDER: list[str] = ["ingest_a", "ingest_b", "extract", "align"]
+    if use_llm_reranker:
+        _STAGE_ORDER.append("rerank")
+    _STAGE_ORDER.append("detect")
     if use_llm_judge:
         _STAGE_ORDER.append("judge")
 
@@ -518,6 +535,7 @@ if run:
                 stage_cb=_stage_cb,
                 classify_docs=classify_docs,
                 use_llm_extraction=use_llm_extraction,
+                use_llm_reranker=use_llm_reranker,
             )
             flags = review_result.flags
             status.update(
