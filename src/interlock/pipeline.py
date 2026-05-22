@@ -75,6 +75,7 @@ def review_two_documents_full(
     stage_cb: StageCallback | None = None,
     classify_docs: bool = False,
     use_llm_extraction: bool = False,
+    use_llm_reranker: bool = False,
 ) -> ReviewResult:
     """Run end-to-end review.
 
@@ -191,6 +192,17 @@ def review_two_documents_full(
 
     semantic = align_semantic(pa, pb, embed_fn=embed_fn, same_page_only=same_page_only)
     combined = combine_alignments(exact, semantic)
+
+    # v2 Sprint 4: opt-in LLM pairing reranker. Pure pass-through when off.
+    if use_llm_reranker:
+        from interlock.llm_pipeline.pair import rerank_weak_pairs
+        _stage("rerank", "start")
+        try:
+            combined = rerank_weak_pairs(combined)
+        except Exception:
+            pass  # API outage / unexpected error → keep Track 1 verdicts
+        _stage("rerank", "done")
+
     _stage("align", "done")
 
     _stage("detect", "start")
@@ -263,6 +275,7 @@ def review_two_documents(
     stage_cb: StageCallback | None = None,
     classify_docs: bool = False,
     use_llm_extraction: bool = False,
+    use_llm_reranker: bool = False,
 ) -> list[Flag]:
     """Back-compat shim: returns only the flag list.
 
@@ -287,4 +300,5 @@ def review_two_documents(
         stage_cb=stage_cb,
         classify_docs=classify_docs,
         use_llm_extraction=use_llm_extraction,
+        use_llm_reranker=use_llm_reranker,
     ).flags

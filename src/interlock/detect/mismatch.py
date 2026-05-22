@@ -52,6 +52,9 @@ class Flag:
     # back-compat with hand-constructed Flags in tests; the adjudicator
     # overwrites with the right label when invoked through the pipeline.
     provenance: Literal["rule_only", "llm_only", "mixed_track", "unknown"] = "unknown"
+    # v2 Sprint 4 — copied from AlignedPair.rerank_rationale by detect_flags.
+    # None when the reranker didn't run or didn't approve this pair.
+    rerank_rationale: str | None = None
 
 
 def detect_flags(
@@ -126,6 +129,7 @@ def detect_flags(
                 deviation_pct=dev,
                 attribute_family=family,
                 pairing_confidence=p.pairing_confidence,
+                rerank_rationale=p.rerank_rationale,
             )
         )
     return out

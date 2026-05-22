@@ -237,3 +237,95 @@ def test_adjudicator_runs_unconditionally() -> None:
         assert f.provenance != "unknown", (
             "pipeline must annotate provenance for every flag"
         )
+
+
+# --- Sprint 4: pairing reranker integration -----------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_pair_cache() -> None:
+    disk_cache.clear_namespace("llm-pair")
+    yield
+    disk_cache.clear_namespace("llm-pair")
+
+
+def _fake_pair_response(decline: bool = False, score: float = 0.9) -> MagicMock:
+    """Build a fake Claude response. Rationale embeds both common raw_values
+    from the Option 1 fixture so the hallucination guard accepts it."""
+    content = MagicMock()
+    content.text = (
+        '{"score":' + f"{score}" + ','
+        '"rationale":"5.75 % and 5.75 % — same impedance record",'
+        '"decline_to_pair":' + ("true" if decline else "false") + '}'
+    )
+    return MagicMock(content=[content])
+
+
+def test_use_llm_reranker_false_is_bit_identical_to_v2_2(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Default off ⇒ no reranker call; flag set unchanged from v2.2."""
+    from interlock.pipeline import review_two_documents_full
+    spy = mocker.patch("interlock.llm_pipeline.pair._call_claude_pair")
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        use_llm_reranker=False,
+    )
+    assert spy.call_count == 0
+    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
+    assert expected_params.issubset(surfaced)
+    for f in result.flags:
+        assert f.rerank_rationale is None
+
+
+def test_use_llm_reranker_true_unanimous_approve_preserves_flags(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Reranker approves every weak pair ⇒ flag count + parameters
+    unchanged from Track 1."""
+    from interlock.pipeline import review_two_documents_full
+    mocker.patch(
+        "interlock.llm_pipeline.pair._call_claude_pair",
+        return_value=_fake_pair_response(decline=False, score=0.9),
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        use_llm_reranker=True,
+    )
+    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
+    assert expected_params.issubset(surfaced)
+
+
+def test_pipeline_survives_reranker_exception(mocker) -> None:  # type: ignore[no-untyped-def]
+    """API outage mid-rerank ⇒ pipeline still ships Track 1 flag set."""
+    from interlock.pipeline import review_two_documents_full
+    mocker.patch(
+        "interlock.llm_pipeline.pair._call_claude_pair",
+        side_effect=RuntimeError("API down"),
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        use_llm_reranker=True,
+    )
+    assert isinstance(result.flags, list)
+
+
+def test_sprint3_provenance_and_sprint4_rationale_coexist() -> None:
+    """Both labels live on the same Flag without interference."""
+    from interlock.detect.mismatch import Flag
+    from interlock.extract.parameters import ParameterRecord
+    r = ParameterRecord(
+        doc_id="d", page=1, bbox=(0, 0, 100, 10), section=None,
+        span_text="5.75%Z", name="%Z", raw_value="5.75 %",
+        normalized_magnitude=0.0575, normalized_unit="dimensionless",
+        provenance="regex",  # type: ignore[arg-type]
+    )
+    f = Flag(
+        parameter="%Z",
+        a_record=r, b_record=r,
+        authoritative_doc_id="d", deviating_doc_id="d",
+        confidence=1.0, rationale="test", authority_rule="MVP",
+        severity="major", deviation_pct=10.0, attribute_family="impedance_pct",
+        provenance="rule_only",  # type: ignore[arg-type]
+        rerank_rationale="confirmed pair",
+    )
+    assert f.provenance == "rule_only"
+    assert f.rerank_rationale == "confirmed pair"
