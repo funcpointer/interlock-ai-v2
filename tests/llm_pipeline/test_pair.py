@@ -60,6 +60,26 @@ def test_strong_pairs_pass_through_untouched(mocker, monkeypatch) -> None:  # ty
     assert out[0].pairing_confidence == 0.9
 
 
+def test_boundary_075_does_get_reranked(mocker, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Phase 19 assigns exactly 0.75 to multi-instance equal-count
+    distinct-y pairs. The reranker boundary is INCLUSIVE so these get
+    a chance at LLM review — strict-less-than caused boundary-case
+    false positives (e.g. cross-instance 'Motor FLA' pairs)."""
+    from interlock.llm_pipeline.pair import rerank_weak_pairs
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    spy = mocker.patch(
+        "interlock.llm_pipeline.pair._call_claude_pair",
+        return_value=_fake_response(
+            '{"score":0.05,"rationale":"77 A vs 42 A are different motor parameters",'
+            '"decline_to_pair":true}'
+        ),
+    )
+    p = _pair(a_raw="77 A", b_raw="42 A", pairing_conf=0.75)
+    out = rerank_weak_pairs([p])
+    assert spy.call_count == 1
+    assert out == []  # decline_to_pair dropped it
+
+
 def test_decline_to_pair_drops_pair(mocker, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from interlock.llm_pipeline.pair import rerank_weak_pairs
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")

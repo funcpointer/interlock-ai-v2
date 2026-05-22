@@ -1,9 +1,11 @@
 """Sprint 4 — LLM pairing reranker over Track 1 weak pairs.
 
-For each AlignedPair with pairing_confidence < weak_threshold, call
+For each AlignedPair with pairing_confidence <= weak_threshold, call
 Claude Sonnet 4.5 with both records' context and ask for a
 (score, rationale, decline_to_pair) verdict. Strong pairs pass through
-untouched.
+untouched. Boundary is INCLUSIVE so Phase 19's multi-instance
+equal-count distinct-y pairs (assigned exactly 0.75) get reranked
+instead of slipping through unreviewed.
 
 Failure modes (API outage, parse error, pydantic validation error,
 hallucination guard rejection) all collapse to "keep Track 1 verdict":
@@ -51,17 +53,21 @@ def rerank_weak_pairs(
     weak_threshold: float = 0.75,
     max_workers: int = _RERANK_MAX_WORKERS,
 ) -> list[AlignedPair]:
-    """Rerank pairs with pairing_confidence < weak_threshold via Claude.
+    """Rerank pairs with pairing_confidence <= weak_threshold via Claude.
 
     Order preserved for survivors. Pairs whose verdict is
     decline_to_pair drop out (callers downstream recompute
     unpaired_a/b from the surviving list).
+
+    Boundary is INCLUSIVE on weak_threshold so Phase 19's multi-instance
+    equal-count distinct-y pairs (which carry exactly 0.75) reach the
+    reranker. Strict-less-than caused boundary-case false positives.
     """
     if not pairs:
         return []
 
     weak_indices = [
-        i for i, p in enumerate(pairs) if p.pairing_confidence < weak_threshold
+        i for i, p in enumerate(pairs) if p.pairing_confidence <= weak_threshold
     ]
     if not weak_indices:
         return list(pairs)
