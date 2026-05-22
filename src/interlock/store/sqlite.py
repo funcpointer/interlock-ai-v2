@@ -52,14 +52,38 @@ def _schema_path() -> Path:
     return Path("data/interlock.schema.sql")
 
 
+def apply_schema(conn: sqlite3.Connection) -> None:
+    """Apply schema + Sprint 3 column migration. Idempotent.
+
+    SQLite doesn't support ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``,
+    so the Sprint 3 ``decision.provenance`` column is added via a
+    Python-side PRAGMA check + conditional ALTER. Re-running on a fresh
+    or already-migrated DB is safe in both cases.
+    """
+    if _schema_path().exists():
+        conn.executescript(_schema_path().read_text())
+    _ensure_decision_provenance_column(conn)
+    conn.commit()
+
+
+def _ensure_decision_provenance_column(conn: sqlite3.Connection) -> None:
+    """v2 Sprint 3 — add decision.provenance column if missing. Idempotent."""
+    cur = conn.execute("PRAGMA table_info(decision)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "provenance" not in cols:
+        conn.execute(
+            "ALTER TABLE decision ADD COLUMN provenance TEXT NOT NULL "
+            "DEFAULT 'unknown'"
+        )
+        conn.commit()
+
+
 def _connect() -> sqlite3.Connection:
     db = _db_path()
     db.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db)
     conn.execute("PRAGMA foreign_keys = ON")
-    if _schema_path().exists():
-        conn.executescript(_schema_path().read_text())
-    conn.commit()
+    apply_schema(conn)
     return conn
 
 
