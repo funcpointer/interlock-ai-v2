@@ -1,8 +1,23 @@
-# InterLock AI
+# InterLock AI v2 — Hybrid Pipeline (Deterministic Floor + Foundation-Model Ceiling)
+
+> **v2 status.** Pivoted from [`funcpointer/interlock-ai`](https://github.com/funcpointer/interlock-ai) at tag `v1.5-mvp-ready`. The v1 repo stays frozen as the deterministic-only edition; this repo is where the hybrid pipeline lands. See [`docs/PIVOT_PLAN.md`](docs/PIVOT_PLAN.md) for pivot rationale + sprint roadmap.
 
 Cross-document discrepancy detection for engineering PDFs. Reviewer uploads two PDFs from the same project; the system surfaces directional, cited, **severity-tiered** parameter mismatches with **identity-aware pairing**, **pairing-confidence scoring**, an **honest unpaired-records surface**, and optional LLM significance judgment.
 
-**Live demo:** https://interlock-ai-re8mb948inkerzmkn5zpgv.streamlit.app/ (Streamlit Cloud free tier — first visit may take ~30 s for cold start)
+**v2 adds** (planned, per sprint plan in `docs/PIVOT_PLAN.md`):
+
+| Layer | What it adds | Sprint |
+|---|---|---|
+| Document classifier (VLM) | Auto-detects doc class (coordination study / spec / HVAC / P&ID / BOM) → routes to per-class extraction + per-class tolerance bands + per-class authority hierarchy | 1 |
+| LLM extraction (structured) | Captures prose-embedded params + non-tabular layouts; solves the SEL-paper zero-yield case | 2 |
+| Adjudicator + provenance UX | Track 1 (deterministic) and Track 2 (LLM) results merged with per-flag provenance (`✓ both`, `⚙ rule-based`, `🧠 AI-detected`) | 3 |
+| LLM pairing reranker | Replaces Phase 19 heuristic overfit with reasoned pairing for ambiguous multi-instance buckets | 4 |
+| Standards-as-RAG + coupled-effect graph | Per-flag retrieval of applicable standard edition + project override; impedance change traverses claim graph to flag dependent claims | 5 |
+| Per-class eval + calibration | Per-doc-class gold sets; confidence calibration against reviewer accept-rate | 6 |
+
+**Live demo (v1, frozen):** https://interlock-ai-re8mb948inkerzmkn5zpgv.streamlit.app/
+
+**Live demo (v2, hybrid):** TBD — first deploy lands at Sprint 1 close.
 
 - PRD: [`docs/PRD.md`](docs/PRD.md) — reviewer persona, wedge, 5-layer platform path
 - TDD: [`docs/TDD.md`](docs/TDD.md) — architecture, tolerance bands, evaluation, known limits

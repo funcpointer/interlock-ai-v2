@@ -93,6 +93,40 @@ This is disclosed in `docs/FIXTURES.md` §2 and §3, in the eval gold set, and i
 
 **Doc A of the Option 2 fixture pair (`fixtures/pdfs/spec_xfmr_001.pdf`) is also not a real document.** It is a deterministically generated synthetic transformer Equipment Data Sheet, produced by `fixtures/synthesis/generate_spec.py`, shaped to match an IEEE C57.12.00 / ANSI C57.12.10 nameplate spec. Used to demonstrate cross-document semantic alignment between heterogeneous document types when paired with the Eaton coordination study. Disclosed in `docs/FIXTURES.md` §2B. Real-spec curation (using a public manufacturer data sheet) is Option 4 in `docs/BACKLOG.md`.
 
+## Phase 23 — Fork to interlock-ai-v2 + hybrid-pivot positioning (this repo's baseline)
+
+After v1's submission delivery (Phase 22), the v1 repo `funcpointer/interlock-ai` was frozen at `v1.5-mvp-ready`. This repo (`funcpointer/interlock-ai-v2`) carries forward the full v1 git history (every phase tag, every v1.x tag) and adds a `v2.0-baseline-from-v1.5-mvp-ready` tag at HEAD.
+
+The pivot rationale, two-track architecture (deterministic floor + foundation-model ceiling), sprint roadmap, cost/latency envelope, and risk register are documented in [`docs/PIVOT_PLAN.md`](PIVOT_PLAN.md). This authorship section is the chronological log; the architectural framing lives in PIVOT_PLAN.
+
+**What was carried over verbatim from v1:**
+- `src/interlock/` — all modules (align, extract, detect, ingest, citation, llm, store, pipeline, ui)
+- `tests/` — 261-test deterministic invariant suite
+- `fixtures/` — three locked demo fixture scenarios (revision diff + cross-doc + scanned OCR)
+- `docs/` — PRD, TDD, ARCHITECTURE, FIXTURES, SCOPE, RISK_REGISTER, DEMO_SCRIPT, BACKLOG, plus this AUTHORSHIP
+- All 23 git tags (`phase-0-scaffold` → `phase-20-ocr-quality`, `v1.0-mvp` → `v1.5-mvp-ready`)
+
+**What was added at fork-time (this commit set):**
+- `docs/PIVOT_PLAN.md` — pivot rationale + sprint roadmap + cost/latency envelope + v2-specific risks
+- README banner repositioning v2 as the hybrid pivot; deterministic-only v1 stays live as a frozen reference
+- v2-specific CLAUDE.md (gitignored) with project rules: Track 1 frozen, all feature work in Track 2 / adjudicator
+- This AUTHORSHIP section
+
+**What stays frozen forever in v2:** Track 1 (`src/interlock/align/`, `src/interlock/extract/`, `src/interlock/detect/`). The 261 deterministic tests gate every v2 commit. Bug-fix-only commits permitted under CI gating; no feature work.
+
+**v2 sprint cadence** (full schedule in `docs/PIVOT_PLAN.md`):
+
+| Sprint | Adds |
+|---|---|
+| 1 | Doc-class classifier (VLM); per-class extraction/tolerance/authority routing |
+| 2 | LLM extraction module (Pydantic ontology); solves prose-paper zero-yield case |
+| 3 | Adjudicator + per-flag provenance UX (`✓ both`, `⚙ rule-based`, `🧠 AI-detected`) |
+| 4 | LLM pairing reranker for ambiguous multi-instance buckets (replaces Phase 19 heuristic overfit) |
+| 5 | Standards-as-RAG (per-flag clause + edition retrieval) + coupled-effect graph traversal |
+| 6 | Per-class eval + confidence calibration in CI |
+
+Total: ~15 weeks from v2.0-baseline-from-v1.5-mvp-ready to feature-complete hybrid. v1 demo URL stays live throughout; v2 demo URL lands at Sprint 1 close.
+
 ## Phase 19 — Identity-first alignment + honest gap surface (after v1.5-mvp-ready)
 
 Four-commit refactor responding to user-reported false flags on the OCR-vs-native fuse-table case. Cross-family fuse pairs (KRP-C-1600SP vs LPS-RK-100SP) and cross-position transformer pairs (150 kVA vs 100 kVA on multi-instance pages) were surfacing because alignment had no notion of *which* fuse / *which* transformer a record described — it pairred by parameter name + page + y-proximity, and y-proximity collapsed under OCR (every vision-derived span shares the whole-page bbox).
