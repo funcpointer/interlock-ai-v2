@@ -57,6 +57,29 @@ _SEVERITY = {
 }
 _SEVERITY_ORDER = {"critical": 0, "major": 1, "minor": 2, "info": 3}
 
+# v2 Sprint 3: maps reviewer-facing filter labels → provenance set the
+# flag's provenance field must belong to to be visible. "All" surfaces
+# every label including the defensive "unknown".
+_TRACK_FILTER_MAP: dict[str, set[str]] = {
+    "All": {"rule_only", "llm_only", "mixed_track", "unknown"},
+    "Deterministic only": {"rule_only"},
+    "AI-only": {"llm_only"},
+    "Hybrid sources": {"mixed_track"},
+}
+
+
+def _provenance_badge(provenance: str) -> str:
+    """Return reviewer-facing badge text for a flag's provenance.
+
+    Silent default on rule_only + unknown — eye drawn to exceptions only,
+    mirroring Phase 19's ⚠️ weak-pair pattern.
+    """
+    if provenance == "llm_only":
+        return " · 🧠 AI-only"
+    if provenance == "mixed_track":
+        return " · 🔀 Hybrid sources"
+    return ""
+
 
 # ----------------------------------------------------------------------
 # Per-session workdir (PDFs must survive across Streamlit reruns so the
@@ -212,6 +235,27 @@ with st.sidebar:
             "confidence down. Flags below the threshold stay accessible in "
             "the **Suppressed** expander on the results page."
         ),
+    )
+
+    st.divider()
+
+    # --- v2 Sprint 3: provenance filter ---------------------------------
+
+    track_filter = st.radio(
+        "Filter by track",
+        options=("All", "Deterministic only", "AI-only", "Hybrid sources"),
+        index=0,
+        help=(
+            "Narrow the visible flag list by which track(s) contributed. "
+            "Both Track 1 (regex) and Track 2 (LLM) always run when "
+            "enabled in the upper sidebar — this filter only changes "
+            "what you SEE, not what gets computed."
+        ),
+    )
+    st.caption(
+        "⚙ Deterministic = rules found both sides · "
+        "🧠 AI-only = LLM found both sides · "
+        "🔀 Hybrid sources = rules + LLM, one side each"
     )
 
     st.divider()
@@ -508,8 +552,18 @@ def _severity_chip(sev: str) -> str:
 flags = st.session_state.get("flags", [])
 if flags:
     elapsed = st.session_state.get("elapsed", 0.0)
-    above = [f for f in flags if f.confidence >= threshold]
-    below = [f for f in flags if f.confidence < threshold]
+    # v2 Sprint 3: apply track filter as well as confidence threshold.
+    _allowed_prov = _TRACK_FILTER_MAP.get(track_filter, _TRACK_FILTER_MAP["All"])
+    above = [
+        f for f in flags
+        if f.confidence >= threshold
+        and getattr(f, "provenance", "unknown") in _allowed_prov
+    ]
+    below = [
+        f for f in flags
+        if f.confidence < threshold
+        and getattr(f, "provenance", "unknown") in _allowed_prov
+    ]
 
     # v2 Sprint 1: doc-class banner above metrics row. Shows what the
     # classifier returned per doc and which severity bands / authority
