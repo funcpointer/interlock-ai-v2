@@ -184,6 +184,29 @@ The adjudicator ships as a pure post-processing layer that runs unconditionally 
 - Sidebar filter narrows the *visible* flag list but doesn't change what's computed. Reviewer can switch back to "All" any time without re-running the pipeline.
 - Per-flag detail line uses "Rules" / "AI" as the reviewer-facing labels for `regex` / `llm`. Internal taxonomy stays unexposed.
 
+## Known limits — Sprint 4 LLM pairing reranker (v2)
+
+The reranker ships behind `use_llm_reranker=False` (default off in both API and UI). When OFF, the pipeline is bit-identical to `v2.2-adjudicator`. When ON, only Track 1 weak pairs (`pairing_confidence < 0.75`) reach the reranker — strong pairs pass through untouched.
+
+**Architecture that generalises:**
+- `PairVerdict` pydantic schema (score + rationale + decline_to_pair)
+- Per-pair parallel `ThreadPoolExecutor(5)` reranker with diskcache by record-tuple hash
+- Hallucination guard: rationale must mention at least one `raw_value`
+- Pure pass-through default: failure modes (API outage, parse error, validation error, hallucination rejection) all collapse to "keep Track 1 verdict"
+- 🤖 Reranked badge replaces ⚠️ weak pair when reranker has spoken
+- Failure semantics via `_RerankFailed` raised inside the `disk_cache.get_or_compute` compute closure → only validated, hallucination-guard-passing verdicts get cached
+
+**Heuristics + scope deliberately limited in Sprint 4:**
+- Only fires on pairs Track 1 already produced. Records that Track 1's Phase 19 gates declined to pair never reach the reranker — they stay in `unpaired_a/b`. Sprint 4 does NOT relitigate Track 1's "skip entirely" verdicts.
+- Eval surface is **3 hand-coded cases** (KRP-C-1600SP vs LPS-RK-400SP, 150 kVA vs 100 kVA, positive 5.75 % control). Statistically thin — Sprint 6 builds per-class gold sets with broader pairing-error labels.
+- Reranker context is record-fields + span_text only; no page image, no sibling-row enrichment beyond what span_text naturally carries. The "Eaton tutorial 200A vs 400A" demo failure case (where both labels co-occur on the same page) needs the prompt's heuristic 4 to fire on the LLM's prior knowledge of tutorial-diagram structure — works in practice on Sonnet 4.5 but isn't a strong guarantee.
+- Default OFF. Reviewers who flip it on for a fuse-heavy coordination study pay $0.10–$0.25 per fresh review. Diskcache means rerun is free.
+
+**Generalisation plan** (post-Sprint 4):
+1. Sprint 5 — Standards-as-RAG (per-clause retrieval per flag) + coupled-effect graph traversal (accept impedance ⇒ surface dependent claims)
+2. Sprint 6 — per-class gold sets with broader pairing-error labels; continuous CI gates
+3. Backlog — page-image context (vision) for one-line-diagram disambiguation if Sprint 6 reveals systematic recall gaps
+
 ## Open questions + future work
 
 - **Entity fingerprinting** (BACKLOG R-F): binding an implicit equipment in one doc to a tagged equipment on the other via attribute fingerprint. Required for cross-doc multi-equipment demos.

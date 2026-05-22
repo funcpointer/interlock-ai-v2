@@ -122,6 +122,25 @@ Shipped via 7 phase tags (`phase-24.1-classifier-schemas` → `phase-24.7-classi
 
 **Honest scope statement.** See `docs/TDD.md` § "Known limits — Sprint 1 doc-class classifier (v2)" for what generalises vs what's overfit, and which 5 of 8 classes still inherit v1 behaviour end-to-end. The 11-doc partial corpus is acknowledged as smaller than the 20-doc spec target — the remaining 9 real PDFs are a sourcing exercise, not a code blocker.
 
+## Sprint 4 (v2) — LLM pairing reranker
+
+Shipped via 4 phase tags (`phase-27.1-rerank-schemas` → `phase-27.4-rerank-ui`) plus a fifth phase-27.5 exit-gate commit on top of `v2.2-adjudicator`. Exit tag: `v2.3-reranker`.
+
+**Components landed:**
+- `src/interlock/llm_pipeline/schemas/pair.py` — `PairVerdict` pydantic v2 frozen model with score-range validation
+- `src/interlock/llm_pipeline/pair.py` — `rerank_weak_pairs()` over Track 1 pairs with `pairing_confidence < 0.75`. Per-pair parallel via `ThreadPoolExecutor(5)`, diskcache namespace `llm-pair` keyed by record-tuple + prompt hash + model + PROMPT_VERSION. Hallucination guard: rationale must mention at least one of the two `raw_value`s; failures collapse to "keep Track 1 verdict". Decline-to-pair drops the pair; downstream `unpaired_a/b` absorbs the records. Failure semantics encoded via `_RerankFailed` exception inside `disk_cache.get_or_compute` so nothing bad gets cached.
+- `src/interlock/llm_pipeline/prompts/pair.md` — system prompt with engineering-document specific decision rules (tutorial-diagram detection, sibling-row reasoning, value-equality-across-pages signal).
+- `src/interlock/align/exact.py` — `AlignedPair` gains `rerank_rationale: str | None = None`, `reranked: bool = False` (back-compat defaults).
+- `src/interlock/detect/mismatch.py` — `Flag` gains `rerank_rationale: str | None = None`; `detect_flags()` copies from pair.
+- `src/interlock/pipeline.py` — `use_llm_reranker` kwarg (default False); reranker call wired between `combine_alignments` and `_stage("align", "done")`; new stage id `rerank`.
+- `src/interlock/ui/app.py` — sidebar toggle (default off); `🤖 Reranked` badge replaces `⚠️ weak pair` when reranker ran; weak-score reranks show both badges; `st.info()` rationale line in expander; JSON export gains `rerank_rationale` key per accepted flag.
+
+**Test surface delta:** +23 tests (6 PairVerdict + 3 AlignedPair back-compat + 10 reranker unit + 4 e2e integration). Live exit-gate tests (3, slow + needs_anthropic) all passed cold on Sonnet 4.5: KRP-C-1600SP vs LPS-RK-400SP and 150 kVA vs 100 kVA decline-or-low-score; 5.75 % vs 5.75 % positive control scores ≥ 0.7. Total v2 test count at `v2.3-reranker`: **377 passing** + live-API slow-marked suites.
+
+**Cost delta:** ~$0.005 per weak pair Sonnet, ~$0.10–$0.25 on fuse-heavy reviews. Locked Option 1 fixture ~$0.025 cold, $0 warm. Sprint 4 exit-gate test suite ~$0.03 per cold run.
+
+**Honest scope statement.** The reranker replaces Phase 19's heuristic *output* on weak pairs but Phase 19 heuristics still gate which pairs reach the reranker in the first place. The exit-gate corpus is anecdotal (3 cases) — broader per-class gold sets are Sprint 6 work. See `docs/TDD.md` § "Known limits — Sprint 4 LLM pairing reranker (v2)".
+
 ## Sprint 3 (v2) — Adjudicator + Provenance UX
 
 Shipped via 5 phase tags (`phase-26.1-flag-provenance-field` → `phase-26.5-adjudicator-schema`) on top of `v2.1-llm-extraction`. Exit tag: `v2.2-adjudicator`.
