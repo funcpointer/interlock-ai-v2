@@ -219,6 +219,19 @@ with st.sidebar:
         ),
     )
 
+    use_llm_extraction = st.toggle(
+        "Track 2 LLM extraction (v2 Sprint 2)",
+        value=False,
+        help=(
+            "Run per-page Claude Sonnet 4.5 extraction in addition to the "
+            "regex extractor. Recovers parameters from prose-heavy documents "
+            "(SEL papers, study narratives) that the regex layer misses. "
+            "Diskcached per page on PDF content hash + prompt version; cold "
+            "run on a 30-page PDF costs ~$0.10–$0.30, warm $0.\n\n"
+            "Toggle off to run Track 1 only (bit-identical to v1.5-mvp-ready)."
+        ),
+    )
+
     st.divider()
 
     # --- Display filter ---------------------------------------------------
@@ -490,6 +503,7 @@ if run:
                 ocr_progress_cb=_ocr_cb if enable_vision_ocr else None,
                 stage_cb=_stage_cb,
                 classify_docs=classify_docs,
+                use_llm_extraction=use_llm_extraction,
             )
             flags = review_result.flags
             status.update(
