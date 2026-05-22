@@ -52,6 +52,10 @@ class AlignedPair:
     # Defaults to 1.0 for back-compat with hand-built AlignedPair in
     # legacy tests.
     pairing_confidence: float = 1.0
+    # v2 Sprint 4 — LLM reranker outputs. Defaults preserve back-compat
+    # with hand-built AlignedPair in legacy alignment tests.
+    rerank_rationale: str | None = None
+    reranked: bool = False
 
 
 def _y_center(r: ParameterRecord) -> float:
