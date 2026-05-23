@@ -281,6 +281,30 @@ Static parameter-family dependency map + Phase-14 SQLite store query for matchin
 3. Backlog — Multi-hop traversal: walk impedance → fault → relay → coordination.
 4. Backlog — Graph visualization (force-directed) in the expander.
 
+## Known limits — Sprint 6 per-class eval + calibration (v2)
+
+Sprint 6 ships the per-class flag eval harness + confidence calibration infra. Seed gold: 1 doc class (`coordination_study`), 1 pair, 4 labelled flags (3 TP + 1 FP trap). Soft CI gate xfails any class with < 3 labelled cases so corpus growth doesn't break green CI.
+
+**Architecture that generalises:**
+- `GoldFlag` / `GoldPair` / `GoldClassFile` pydantic models with strict validation
+- Substring matcher requires THREE independent gates (parameter + both raw_values), reducing false matches
+- Per-pair `pipeline_kwargs` pinned in YAML — explicit reproducibility against feature-flag drift
+- Calibration: 10-decile binning + Brier score; sample sizes < 5 per bin flagged as insufficient
+- CLI runners write JSON + Markdown artifacts for audit + baselining
+
+**Heuristics + scope deliberately limited in Sprint 6:**
+- Gold corpus is sparse at ship (1 class). Adding pairs/labels per class is content sourcing — not code work — and is the post-Sprint-6 grow-the-corpus task.
+- Substring matcher is loose by design; false matches are possible when parameter / value names overlap. Tighter regex matching deferred until corpus has enough cases to surface real collision patterns.
+- Soft CI gate (xfail for sparse classes) means precision/recall regressions go undetected for classes with < 3 cases. Acknowledged trade-off.
+- NERC / IEEE PES incident-database benchmarks not included; deferred to content-curation roadmap.
+- No statistical-significance test on Brier delta across runs. Sprint 6's calibration is reporting, not regression-gating.
+
+**Generalisation plan** (post-Sprint 6):
+1. Grow per-class gold sets to ≥ 5 labelled cases per class (content sourcing).
+2. Tighten soft CI gate as each class crosses the SPARSE_THRESHOLD (currently 3).
+3. Weekly calibration runs producing diff vs prior week.
+4. Backlog — incident-DB benchmarks (NERC, IEEE PES); embedding-based RAG over verbatim standards corpus.
+
 ## Open questions + future work
 
 - **Entity fingerprinting** (BACKLOG R-F): binding an implicit equipment in one doc to a tagged equipment on the other via attribute fingerprint. Required for cross-doc multi-equipment demos.

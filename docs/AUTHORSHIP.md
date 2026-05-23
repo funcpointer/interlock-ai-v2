@@ -122,6 +122,24 @@ Shipped via 7 phase tags (`phase-24.1-classifier-schemas` → `phase-24.7-classi
 
 **Honest scope statement.** See `docs/TDD.md` § "Known limits — Sprint 1 doc-class classifier (v2)" for what generalises vs what's overfit, and which 5 of 8 classes still inherit v1 behaviour end-to-end. The 11-doc partial corpus is acknowledged as smaller than the 20-doc spec target — the remaining 9 real PDFs are a sourcing exercise, not a code blocker.
 
+## Sprint 6 (v2) — Per-class eval + confidence calibration
+
+Shipped via 2 phase tags (`phase-31.1-per-class-gold`, `phase-31.3-calibration`) plus a final `v2.7-eval` exit on top of `v2.6-graph`.
+
+**Components landed:**
+- `src/interlock/eval/per_class.py` — `GoldFlag` / `GoldPair` / `GoldClassFile` pydantic models + `flag_matches_gold` substring matcher (parameter + both raw_values, case-insensitive) + `score_pair` (TP/FN/FP) + `evaluate_class` (precision/recall/F1).
+- `src/interlock/eval/calibration.py` — `calibrate(labeled, n_bins=10)` returns `CalibrationReport(brier_score, n, bins=[...])`. Decile binning; Brier = mean((conf - is_tp)²). Markdown renderer flags bins with < 5 samples as "_insufficient sample_".
+- `scripts/run_per_class_flag_eval.py` — CLI runner over `fixtures/eval/gold_flags/*.yaml`; writes `eval/results/per_class.json` + `eval/results/per_class.md`.
+- `scripts/run_confidence_calibration.py` — CLI calibration reporter; labels each surfaced flag as TP via gold matches; writes `docs/eval/confidence_calibration.md`.
+- `tests/eval/test_per_class_gate.py` — slow + needs_voyage soft CI gate (precision ≥ 0.6 / recall ≥ 0.6) with xfail for sparse classes (< 3 gold cases).
+- `fixtures/eval/gold_flags/coordination_study.yaml` — seed gold: Option 1 fixture pair, 3 TP + 1 FP trap.
+
+**Baseline on seed corpus:** coordination_study precision=1.00, recall=1.00, F1=1.00 (1 pair, 4 labelled flags). Brier=0.0025 on 4 surfaced flags all in 0.9–1.0 bin.
+
+**Test surface delta:** +18 tests (10 per-class + 8 calibration). All offline; no LLM cost. Soft CI gate adds 1 parametrized test (xfail-soft).
+
+**Honest scope statement.** Sprint 6 ships INFRA + 1 seed gold (coordination_study, 1 pair, 4 labels). Other doc classes (`equipment_spec`, `relay_setting_sheet`, `hvac_schedule`, `pid`, `bom`, `civil_drawing`) need fixture pairs + labeled flags before their gates activate; xfail-soft semantics keep CI green during corpus growth. PIVOT_PLAN's "Bench against NERC/IEEE PES" is content sourcing deferred. See `docs/TDD.md` § "Known limits — Sprint 6 per-class eval + calibration (v2)".
+
 ## Sprint 5b (v2) — Coupled-effect graph traversal
 
 Shipped via 2 phase tags (`phase-30.1-coupled-map`, `phase-30.3-coupled-ui`) on top of `v2.5-rag`. Exit tag: `v2.6-graph`.

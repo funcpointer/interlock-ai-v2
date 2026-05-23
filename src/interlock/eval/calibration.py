@@ -92,12 +92,11 @@ def render_markdown(report: CalibrationReport) -> str:
             lines.append(f"| {bin_label} | 0 | — | — | — |")
             continue
         diff = b.observed_rate - b.predicted_avg
-        sign = "+" if diff >= 0 else ""
         flag = ""
         if b.count < 5:
             flag = " _(insufficient sample)_"
         lines.append(
             f"| {bin_label} | {b.count} | {b.predicted_avg:.2f} | "
-            f"{b.observed_rate:.2f} | {sign}{diff:+.2f}{flag} |"
+            f"{b.observed_rate:.2f} | {diff:+.2f}{flag} |"
         )
     return "\n".join(lines) + "\n"
