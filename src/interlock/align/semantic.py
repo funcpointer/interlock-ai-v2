@@ -107,14 +107,19 @@ def align_semantic(
                 continue
             if same_page_only and ra.page != rb.page:
                 continue
-            # v2 Sprint 5a hotfix — mirror Phase 19's same-entity rule.
-            # If both records are entity-tagged, require an exact match.
-            # If only one is tagged, refuse (cross-instance candidate).
-            # If neither is tagged, allow (semantic alignment's job is
-            # exactly to bridge un-grounded records).
-            if ra.entity_tag or rb.entity_tag:
-                if ra.entity_tag != rb.entity_tag:
-                    continue
+            # v2 Sprint 5a hotfix (revised) — only refuse cross-entity
+            # pairs when BOTH records carry tags AND they differ. Phase 19's
+            # strictness (asymmetric → refuse) belongs in align_exact, where
+            # positional anchors back it. Semantic alignment's job is to
+            # BRIDGE un-grounded records — asymmetric tagging is normal
+            # cross-document territory (one doc tags rows by section number,
+            # the other has none).
+            if (
+                ra.entity_tag
+                and rb.entity_tag
+                and ra.entity_tag != rb.entity_tag
+            ):
+                continue
             # Reject dimensionally incompatible candidates outright
             # (e.g. "Primary Voltage: 12.47 kV" vs "Fault Current: 20,000 A").
             # This filter is engineering-domain common sense and dramatically

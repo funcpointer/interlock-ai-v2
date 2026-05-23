@@ -92,9 +92,12 @@ def test_semantic_allows_same_entity_pair_when_both_tagged() -> None:
     assert pairs[0].a.entity_tag == pairs[0].b.entity_tag == "XFMR-001"
 
 
-def test_semantic_refuses_when_only_one_side_tagged() -> None:
-    """Asymmetric tagging — refuse the pair (other side might be a different
-    physical instance the detector missed)."""
+def test_semantic_allows_asymmetric_tagging() -> None:
+    """Asymmetric tagging — semantic should ALLOW the pair. Semantic's job
+    is to bridge un-grounded records across documents that use different
+    tagging conventions (one tags by section number, the other doesn't).
+    Phase 19's strict asymmetric-refuse lives in align_exact, where
+    positional anchors back it."""
     a = [_p_tagged("Param", "A", tag="XFMR-001")]
     b = [_p_tagged("Param", "B", tag="")]
 
@@ -102,7 +105,7 @@ def test_semantic_refuses_when_only_one_side_tagged() -> None:
         return {"Param": [1.0, 0.0]}
 
     pairs = align_semantic(a, b, embed_fn=fake_embed, threshold=0.5)
-    assert pairs == [], "asymmetric-tag pair must be refused"
+    assert len(pairs) == 1, "asymmetric-tag pair must be ALLOWED in semantic"
 
 
 def test_semantic_allows_pair_when_neither_tagged() -> None:
