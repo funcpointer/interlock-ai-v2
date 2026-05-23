@@ -232,6 +232,31 @@ Entity grounding ships behind `use_entity_grounding=True` (default ON in API and
 3. Backlog — multi-column layout disambiguation if Sprint 6 reveals systematic recall gaps
 4. Backlog — Track 1 regex equipment-ID detection (for fully offline operation)
 
+## Known limits — Sprint 5a Standards-as-RAG (v2)
+
+Sprint 5a ships a curated YAML clause registry, not an embedding-based RAG. When `use_llm_judge=True` (Sprint 4.5 default), the judge prompt receives an "Applicable standards" block listing matched clauses; judge cites them in rationale + returns the clause IDs structured. When the registry is empty or no clauses match a flag's family, the judge runs unchanged (graceful fallback).
+
+**Architecture that generalises:**
+- `Clause` + `ClauseCitation` schemas with strict field validation
+- Per-entry pydantic validation on YAML load; bad entries dropped + logged
+- Family-indexed lookup + optional doc_class filter (empty `applicable_doc_classes` = applies to all)
+- Per-project overrides at `fixtures/projects/<id>/tolerances.yaml` (additive + override-by-clause-id)
+- Hallucination filter: judge returns clause IDs not in registry → silently dropped
+- Cache key includes matched clause IDs so registry growth invalidates correctly
+
+**Heuristics + scope deliberately limited in Sprint 5a:**
+- Registry is hand-curated (~10 seed entries). Growing it is a content-curation exercise, not a code change.
+- Clause summaries are OUR paraphrases. We cite source + edition so a reviewer can verify against the original standard; we do NOT distribute standard verbatim text (paywall + copyright).
+- No clickable URLs in the citation UI — paraphrases live in our YAML, not on any vendor's domain.
+- Doc-class filter is OR-with-empty-list semantics: empty `applicable_doc_classes` = "applies to all". Tighter scoping (e.g. "applies only when both docs are X") would need a richer rule language; out of scope.
+- Coupled-effect graph traversal (Sprint 5b) NOT included here — accepting a flag does not yet surface dependent claims as deferred flags. Sprint 5b extends this.
+
+**Generalisation plan** (post-Sprint 5a):
+1. Sprint 5b — Coupled-effect graph traversal: on accept of an impedance flag, surface dependent claims (relay pickup, breaker margin, conductor sizing) as deferred flags via the existing Phase 14 SQLite claim graph.
+2. Sprint 6 — Per-class gold sets + confidence calibration.
+3. Backlog — Verbatim standards corpus + true embedding-based RAG (legal review per source).
+4. Backlog — UI: filter visible flags by cited clause.
+
 ## Open questions + future work
 
 - **Entity fingerprinting** (BACKLOG R-F): binding an implicit equipment in one doc to a tagged equipment on the other via attribute fingerprint. Required for cross-doc multi-equipment demos.

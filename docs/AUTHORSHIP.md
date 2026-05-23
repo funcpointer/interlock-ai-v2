@@ -122,6 +122,26 @@ Shipped via 7 phase tags (`phase-24.1-classifier-schemas` → `phase-24.7-classi
 
 **Honest scope statement.** See `docs/TDD.md` § "Known limits — Sprint 1 doc-class classifier (v2)" for what generalises vs what's overfit, and which 5 of 8 classes still inherit v1 behaviour end-to-end. The 11-doc partial corpus is acknowledged as smaller than the 20-doc spec target — the remaining 9 real PDFs are a sourcing exercise, not a code blocker.
 
+## Sprint 5a (v2) — Standards-as-RAG (curated YAML clause registry)
+
+Shipped via 5 phase tags (`phase-29.1-clause-schemas` → `phase-29.5-rag-ui`) plus a sixth phase-29.6 live-exit-gate commit on top of `v2.4-grounding`. Exit tag: `v2.5-rag`.
+
+**Components landed:**
+- `src/interlock/llm_pipeline/schemas/clause.py` — `Clause` + `ClauseCitation` pydantic v2 frozen models with strict field validation.
+- `src/interlock/llm_pipeline/standards.py` — `load_clauses()` + `clauses_for(family, doc_class, project_id)` + `merge_project_overrides()` + `to_citation()`. Failure modes (missing file, parse error, validation error, bad individual entries) all collapse to `[]` so the LLM judge keeps running gracefully without grounding.
+- `data/standards/clauses.yaml` — 10 seed entries covering impedance_pct, fault_current_a/ka, transformer_rating_va, voltage_v/kv, motor_fla_a, relay_pickup_a, fuse_amps, breaker_interrupting_ka, arc_flash_cal_cm2, transformer_loading_pct. Hand-paraphrased summaries; not standard verbatim.
+- `src/interlock/detect/mismatch.py` — `Flag` gains `cited_clauses: tuple[ClauseCitation, ...] = ()`.
+- `src/interlock/detect/significance.py` — `_build_standards_block()` injects "Applicable standards" section into judge user prompt when matches exist. `SignificanceJudgment` gains `cited_clause_ids: list[str]`. `judge()` accepts `project_id` kwarg; cache payload includes matched clause IDs so registry growth invalidates correctly. `apply_judgment_to_flag()` accepts `project_id` to resolve overrides correctly; hallucinated IDs silently filtered.
+- `src/interlock/pipeline.py` — `project_id: str | None = None` kwarg on `review_two_documents_full` + back-compat shim; forwarded to `judge()` and `apply_judgment_to_flag()`.
+- `src/interlock/ui/app.py` — sidebar "Project ID (optional)" text input; `_standards_chip()` helper for header (silent when no citations); cited-clauses list in flag expander; JSON export gains `cited_clauses` list per accepted flag; judge stage label refreshed to "AI severity + standards citations".
+- `fixtures/projects/testproj/tolerances.yaml` — e2e test fixture for project override.
+
+**Test surface delta:** +30 tests (8 schema + 12 registry + 6 judge integration + 4 e2e pipeline). Live exit-gate tests (3, slow + needs_anthropic): %Z flag cites IEEE C57.12.00; Fault Current flag cites IEEE 242 / C37.04; empty registry pathological still ships flags. All 3/3 pass on Sonnet 4.5 (~90 s cold, ~$0.05). Total v2 test count at `v2.5-rag`: **438 passing** + live-API slow-marked suites.
+
+**Cost delta:** $0 incremental per flag (registry lookup is in-process); ~+200 tokens / flag on the judge prompt; ~$0.001 added per flag judged.
+
+**Honest scope statement.** Sprint 5a ships a curated YAML clause ontology, NOT an embedding-based RAG over standards full-text. Summaries are OUR paraphrases of the cited clauses, not verbatim quotes — reviewer can cross-check against the original standard themselves via `source_name + edition_year`. PIVOT_PLAN names it "Standards-as-RAG"; we ship structured lookup at LLM-judge prompt time. Coupled-effect graph traversal (Sprint 5b) NOT included here.
+
 ## Sprint 4.5 (v2) — Entity grounding + defaults flip + UI copy scrub
 
 Shipped via 5 phase tags (`phase-28.1-entity-schemas` → `phase-28.5-ui-copy-scrub`) plus a sixth phase-28.6 exit-gate commit on top of `v2.3-reranker`. Exit tag: `v2.4-grounding`.
