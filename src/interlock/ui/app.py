@@ -34,6 +34,9 @@ except Exception:  # pragma: no cover
 
 from interlock.align.embed import embed_voyage  # noqa: E402
 from interlock.citation.render import render_citation  # noqa: E402
+from interlock.detect.coupled import (  # noqa: E402
+    coupled_claims_for, coupled_families_for,
+)
 from interlock.extract.parameters import extract_parameters  # noqa: E402
 from interlock.ingest.pdf import ingest  # noqa: E402
 from interlock.pipeline import review_two_documents_full  # noqa: E402
@@ -919,6 +922,34 @@ if flags:
                         f"  _{c.summary}_"
                     )
 
+            # v2 Sprint 5b: coupled-effect families — what else to verify.
+            _coupled = coupled_families_for(getattr(f, "attribute_family", None))
+            if _coupled:
+                st.markdown("**🕸️ Coupled effects — also verify:**")
+                # Persisted matches per family (empty when persist_claims is off).
+                try:
+                    _persisted = coupled_claims_for(
+                        getattr(f, "attribute_family", None)
+                    )
+                except Exception:
+                    _persisted = []
+                _by_attr: dict[str, list[Any]] = {}
+                for _cl in _persisted:
+                    _by_attr.setdefault(_cl.attribute, []).append(_cl)
+                for _fam in _coupled[:8]:
+                    _matches = _by_attr.get(_fam, [])
+                    if _matches:
+                        entries = ", ".join(
+                            f"`{_cl.entity.id}:{_cl.raw_value}` "
+                            f"(p{_cl.source_record.page})"
+                            for _cl in _matches[:3]
+                        )
+                        st.markdown(f"- `{_fam}` — {len(_matches)} record(s): {entries}")
+                    else:
+                        st.markdown(f"- `{_fam}`")
+                if len(_coupled) > 8:
+                    st.caption(f"_+{len(_coupled) - 8} more coupled families_")
+
             cit_a = None
             cit_b = None
             err_a = err_b = None
@@ -1008,6 +1039,9 @@ if flags:
                             }
                             for c in (getattr(f, "cited_clauses", ()) or ())
                         ],
+                        "coupled_effects": coupled_families_for(  # v2 Sprint 5b
+                            getattr(f, "attribute_family", None)
+                        ),
                     }
                     st.rerun()
             with b_dismiss:
