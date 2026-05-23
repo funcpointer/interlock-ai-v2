@@ -42,15 +42,38 @@ def test_multiple_enclosing_entities_tightest_fit_wins() -> None:
     assert out[0].entity_tag == "INNER"
 
 
-def test_no_enclosure_falls_back_to_nearest() -> None:
+def test_no_enclosure_leaves_tag_empty() -> None:
+    """v2.7 hotfix: dropped nearest-y fallback.
+
+    On diagram pages, PyMuPDF text-layer y is draw-order y, not visual y.
+    Nearest-y fallback mixes incompatible coordinate spaces and produces
+    systematic mis-bindings. Honest unbinding (empty tag) is now preferred;
+    downstream alignment handles untagged records under its own rules
+    (semantic asymmetric-allow per Sprint 5a).
+    """
     from interlock.extract.entity_bind import bind_records_to_entities
     rec = _record(y_top=100, y_bottom=110)
     ents = {1: [
         _entity("FAR", y_top=0, y_bottom=10),
-        _entity("NEAR", y_top=120, y_bottom=140),
+        _entity("NEAR_BUT_NOT_ENCLOSING", y_top=120, y_bottom=140),
     ]}
     out = bind_records_to_entities([rec], ents)
-    assert out[0].entity_tag == "NEAR"
+    assert out[0].entity_tag == "", (
+        "no enclosure → empty tag (no nearest fallback). "
+        f"Got {out[0].entity_tag!r}."
+    )
+
+
+def test_no_enclosure_does_not_pick_nearest_even_when_close() -> None:
+    """Belt-and-suspenders: a tightly-enclosing nearby entity that JUST
+    misses the y_center must NOT bind. Verifies fallback truly removed."""
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record(y_top=100, y_bottom=110)  # y_center = 105
+    ents = {1: [
+        _entity("ALMOST_ENCLOSING", y_top=80, y_bottom=104),  # 1px short
+    ]}
+    out = bind_records_to_entities([rec], ents)
+    assert out[0].entity_tag == ""
 
 
 def test_no_entities_on_page_leaves_tag_empty() -> None:

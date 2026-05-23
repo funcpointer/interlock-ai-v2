@@ -46,10 +46,24 @@ def bind_records_to_entities(
 def _pick_entity(
     y_center: float, page_ents: list[DetectedEntity],
 ) -> DetectedEntity | None:
-    """Pick the best-binding entity for a y_center on its page.
+    """Pick the enclosing entity for a y_center on its page.
 
-    Tightest-fit enclosure wins; else nearest by y-distance.
-    Returns None only when page_ents is empty.
+    Tightest-fit enclosure wins. Returns None when nothing encloses
+    the y_center — including when page_ents is empty.
+
+    v2.7 hotfix: dropped nearest-y fallback. On diagram pages, PyMuPDF
+    text-layer y is draw-order y, not visual y. The detector's y is
+    visual y. Nearest-fallback mixed the two coordinate spaces and
+    produced systematic mis-bindings (e.g. LPS-RK-400SP record bound to
+    LPS-RK-100SP entity 50px away in PyMuPDF space, even though the
+    visual layout puts them in different regions of the page). Honest
+    unbinding (entity_tag stays empty) lets downstream alignment
+    (semantic / reranker) handle the case under their own rules, rather
+    than locking in a false same-tag pair with confidence 1.00.
+
+    The proper long-term fix is the Sprint 8 vision lane, where vision
+    extraction returns (entity, value) tuples together in image-space,
+    eliminating the binding step.
     """
     if not page_ents:
         return None
@@ -59,9 +73,4 @@ def _pick_entity(
     ]
     if enclosing:
         return min(enclosing, key=lambda e: e.y_bottom - e.y_top)
-
-    def _dist(e: DetectedEntity) -> float:
-        e_center = (e.y_top + e.y_bottom) / 2.0
-        return abs(e_center - y_center)
-
-    return min(page_ents, key=_dist)
+    return None
