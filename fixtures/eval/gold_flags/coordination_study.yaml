@@ -1,0 +1,37 @@
+# Sprint 6 — per-class flag gold for coordination_study.
+# Each pair lists expected surfaced flags (true positives) + suppressed
+# flags (false-positive traps). Harness scores precision/recall vs this.
+doc_class: coordination_study
+description: |
+  Coordination-study fixture pairs from the Eaton tutorial PDFs with
+  planted mutations from Phase 1 of v1.
+
+pairs:
+  - id: option1-60vs90
+    doc_a: fixtures/pdfs/doc_a_60pct.pdf
+    doc_b: fixtures/pdfs/doc_b_90pct.pdf
+    pipeline_kwargs:
+      classify_docs: false
+      use_llm_extraction: false
+      use_llm_reranker: false
+      use_entity_grounding: false
+      use_llm_judge: false
+      same_page_only: false
+    surfaced:
+      - id: TP-1
+        parameter_substr: "%Z"
+        a_value_substr: "5.75"
+        b_value_substr: "0.575"
+      - id: TP-2
+        parameter_substr: "Fault Current"
+        a_value_substr: "20,000"
+        b_value_substr: "200,000"
+      - id: TP-3
+        parameter_substr: "Transformer Rating"
+        a_value_substr: "1000 kVA"
+        b_value_substr: "100 kVA"
+    suppressed:
+      - id: FP-1
+        parameter_substr: "kVA"
+        a_value_substr: "150"
+        b_value_substr: "0.15"
