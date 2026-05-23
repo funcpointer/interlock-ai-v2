@@ -1,0 +1,10 @@
+# Sprint 5a — test fixture for per-project clause override.
+clauses:
+  - clause_id: IEEE-C57.12.00-2015-5.4
+    edition_year: 2024
+    source_name: "TESTPROJ override of IEEE C57.12.00-2015 §5.4"
+    applicable_families: [impedance_pct]
+    applicable_doc_classes: []
+    tolerance_band: 0.05
+    summary: |
+      Project override: tighter ±5% tolerance per testproj engineering memo.

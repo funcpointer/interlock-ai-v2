@@ -263,9 +263,19 @@ def judge_batch(flags: list[Flag], *, model: str = DEFAULT_MODEL) -> dict[str, S
     return out
 
 
-def apply_judgment_to_flag(flag: Flag, judgment: SignificanceJudgment) -> Flag:
+def apply_judgment_to_flag(
+    flag: Flag,
+    judgment: SignificanceJudgment,
+    *,
+    project_id: str | None = None,
+) -> Flag:
     """Return a new Flag with severity + rationale enriched from the LLM
-    judgment. Authority + citation tuple are preserved verbatim."""
+    judgment. Authority + citation tuple are preserved verbatim.
+
+    v2 Sprint 5a — ``project_id`` is forwarded to the clause-registry lookup
+    so per-project overrides resolve to the right Clause when the LLM cited
+    an overridden ID.
+    """
     new_rationale = (
         f"{flag.rationale} — {judgment.engineering_explanation}"
         if judgment.engineering_explanation
@@ -274,11 +284,17 @@ def apply_judgment_to_flag(flag: Flag, judgment: SignificanceJudgment) -> Flag:
     # v2 Sprint 5a — resolve cited_clause_ids → ClauseCitation tuple.
     # Hallucinated IDs (not in registry) are silently dropped.
     from interlock.llm_pipeline.schemas.clause import ClauseCitation
-    from interlock.llm_pipeline.standards import load_clauses
+    from interlock.llm_pipeline.standards import (
+        load_clauses, merge_project_overrides,
+    )
 
     cited: tuple[ClauseCitation, ...] = ()
     if judgment.cited_clause_ids:
-        by_id = {c.clause_id: c for c in load_clauses()}
+        base = load_clauses()
+        clauses = (
+            merge_project_overrides(base, project_id) if project_id else base
+        )
+        by_id = {c.clause_id: c for c in clauses}
         cited = tuple(
             to_citation(by_id[cid])
             for cid in judgment.cited_clause_ids

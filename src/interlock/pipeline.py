@@ -77,6 +77,7 @@ def review_two_documents_full(
     use_llm_extraction: bool = True,       # v2.4: flipped to True
     use_llm_reranker: bool = True,         # v2.4: flipped to True
     use_entity_grounding: bool = True,     # v2.4: new, default True
+    project_id: str | None = None,         # v2 Sprint 5a — clause-registry project override
 ) -> ReviewResult:
     """Run end-to-end review.
 
@@ -230,7 +231,12 @@ def review_two_documents_full(
 
     if use_llm_judge and flags:
         _stage("judge", "start")
-        flags = [apply_judgment_to_flag(f, judge(f)) for f in flags]
+        flags = [
+            apply_judgment_to_flag(
+                f, judge(f, project_id=project_id), project_id=project_id,
+            )
+            for f in flags
+        ]
         _stage("judge", "done")
 
     # Compute unpaired sets from the COMBINED aligned-pair list (before
@@ -293,6 +299,7 @@ def review_two_documents(
     use_llm_extraction: bool = True,       # v2.4: flipped to True
     use_llm_reranker: bool = True,         # v2.4: flipped to True
     use_entity_grounding: bool = True,     # v2.4: new, default True
+    project_id: str | None = None,         # v2 Sprint 5a — clause-registry project override
 ) -> list[Flag]:
     """Back-compat shim: returns only the flag list.
 
@@ -319,4 +326,5 @@ def review_two_documents(
         use_llm_extraction=use_llm_extraction,
         use_llm_reranker=use_llm_reranker,
         use_entity_grounding=use_entity_grounding,
+        project_id=project_id,
     ).flags

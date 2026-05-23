@@ -471,3 +471,118 @@ def test_detector_exception_falls_back_gracefully(mocker) -> None:  # type: igno
     expected_params = {"%Z", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
     assert expected_params.issubset(surfaced)
+
+
+# --- Sprint 5a: standards RAG integration -----------------------------
+
+
+def _fake_judge_response_with_clauses(clause_ids: list[str]):  # type: ignore[no-untyped-def]
+    """Build a fake call_structured tuple (Judgment, usage)."""
+    from interlock.detect.significance import SignificanceJudgment
+    j = SignificanceJudgment(
+        severity="major",
+        within_typical_tolerance=False,
+        engineering_explanation="Test rationale.",
+        downstream_effects=[],
+        confidence=0.95,
+        cited_clause_ids=clause_ids,
+    )
+    return (j, {"input": 0, "cache_read": 0, "cache_creation": 0, "output": 0})
+
+
+@pytest.fixture(autouse=True)
+def _clear_judge_cache() -> None:
+    disk_cache.clear_namespace("llm-significance")
+    yield
+    disk_cache.clear_namespace("llm-significance")
+
+
+def test_project_id_none_uses_base_registry(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Without project_id, judge sees only the base registry."""
+    from interlock.pipeline import review_two_documents_full
+
+    mocker.patch(
+        "interlock.detect.significance.call_structured",
+        return_value=_fake_judge_response_with_clauses(["IEEE-C57.12.00-2015-5.4"]),
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        project_id=None,
+    )
+    impedance_flags = [f for f in result.flags if "%Z" in f.parameter]
+    assert impedance_flags, "expected at least one %Z flag"
+    cited_ids = {
+        c.clause_id for f in impedance_flags for c in f.cited_clauses
+    }
+    # Base registry should expose IEEE-C57.12.00-2015-5.4 for impedance_pct
+    assert "IEEE-C57.12.00-2015-5.4" in cited_ids
+
+
+def test_project_id_loads_override(mocker) -> None:  # type: ignore[no-untyped-def]
+    """project_id='testproj' makes the judge see the override clause."""
+    from interlock.pipeline import review_two_documents_full
+
+    mocker.patch(
+        "interlock.detect.significance.call_structured",
+        return_value=_fake_judge_response_with_clauses(["IEEE-C57.12.00-2015-5.4"]),
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        project_id="testproj",
+    )
+    impedance_flags = [f for f in result.flags if "%Z" in f.parameter]
+    assert impedance_flags
+    # Override entry has source_name starting with "TESTPROJ override"
+    override_present = any(
+        "TESTPROJ override" in c.source_name
+        for f in impedance_flags for c in f.cited_clauses
+    )
+    assert override_present, (
+        f"expected TESTPROJ override; got "
+        f"{[c.source_name for f in impedance_flags for c in f.cited_clauses]}"
+    )
+
+
+def test_project_id_nonexistent_falls_back_gracefully(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Unknown project_id → base registry only, no exception."""
+    from interlock.pipeline import review_two_documents_full
+
+    mocker.patch(
+        "interlock.detect.significance.call_structured",
+        return_value=_fake_judge_response_with_clauses([]),
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        project_id="this-project-does-not-exist",
+    )
+    assert isinstance(result.flags, list)
+
+
+def test_use_llm_judge_false_keeps_cited_clauses_empty(mocker) -> None:  # type: ignore[no-untyped-def]
+    """No judge call → Flag.cited_clauses must be empty for every flag."""
+    from interlock.pipeline import review_two_documents_full
+
+    spy = mocker.patch("interlock.detect.significance.call_structured")
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
+    )
+    assert spy.call_count == 0
+    for f in result.flags:
+        assert f.cited_clauses == ()
