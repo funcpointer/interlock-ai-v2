@@ -207,6 +207,31 @@ The reranker ships behind `use_llm_reranker=False` (default off in both API and 
 2. Sprint 6 — per-class gold sets with broader pairing-error labels; continuous CI gates
 3. Backlog — page-image context (vision) for one-line-diagram disambiguation if Sprint 6 reveals systematic recall gaps
 
+## Known limits — Sprint 4.5 entity grounding (v2)
+
+Entity grounding ships behind `use_entity_grounding=True` (default ON in API and UI). When OFF: pipeline is bit-identical to `v2.3-reranker`. When ON: each page of each PDF gets one Sonnet 4.5 call returning the equipment-ID inventory; records bind by y-range enclosure with nearest-y fallback; Phase 19's existing same-entity rule refuses cross-entity pairs at the aligner.
+
+**Architecture that generalises:**
+- Per-page LLM entity detector with kind classification (equipment / circuit / section / unknown)
+- Pure y-binding post-processor with tightest-fit enclosure + nearest-y fallback
+- Phase 19 same-entity rule unchanged; entity grounding just populates more tags
+- Stoplist + pydantic validation defends against detector hallucination
+- Default ON; explicit `use_entity_grounding=False` preserves v2.3 snapshot equivalence
+
+**Heuristics + scope deliberately limited in Sprint 4.5:**
+- Detector relies on LLM prior knowledge of equipment-ID patterns. Novel equipment classes (custom client naming, non-English IDs) may not be recognized. No regex fallback — detector failure → empty list → records stay untagged.
+- Asymmetric detection (entity found on Doc A but not Doc B's same page) means real mismatches between same-named equipment can be misrouted to `unpaired_a/b` instead of surfacing as flags. Honest gap > false positive but not zero cost; surfaced in the UI's "📋 Unpaired records" expander.
+- Binding uses y-coordinates only. Multi-column page layouts where two pieces of equipment share y-bands are not disambiguated.
+- Detector cost is ~$0.005 per page Sonnet; a 100-page PDF cold runs ~$0.50. Cached after first run.
+- Eval surface is **3 hand-coded cases** on the locked Option 1 fixture (two false-positive suppressions + one positive control). Statistically thin; broader pairing-error gold sets are Sprint 6 work.
+- LLM extraction taxonomy bug surfaced during Sprint 4.5 live tests: `IFLA=42A` extracted as parameter named `Motor FLA` (collapsing distinct currents into one bucket). Entity grounding correctly suppresses the 77A vs 42A cross-instance pair, but the extraction-side taxonomy bug remains for Sprint 5+ to fix via prompt sharpening.
+
+**Generalisation plan** (post-Sprint 4.5):
+1. Sprint 5 — Standards-as-RAG (per-clause retrieval per flag) + coupled-effect graph traversal + extraction taxonomy sharpening (FLA vs IFLA vs locked-rotor)
+2. Sprint 6 — per-class gold sets with broader pairing-error labels; continuous CI gates
+3. Backlog — multi-column layout disambiguation if Sprint 6 reveals systematic recall gaps
+4. Backlog — Track 1 regex equipment-ID detection (for fully offline operation)
+
 ## Open questions + future work
 
 - **Entity fingerprinting** (BACKLOG R-F): binding an implicit equipment in one doc to a tagged equipment on the other via attribute fingerprint. Required for cross-doc multi-equipment demos.

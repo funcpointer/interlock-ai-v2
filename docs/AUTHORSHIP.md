@@ -122,6 +122,29 @@ Shipped via 7 phase tags (`phase-24.1-classifier-schemas` → `phase-24.7-classi
 
 **Honest scope statement.** See `docs/TDD.md` § "Known limits — Sprint 1 doc-class classifier (v2)" for what generalises vs what's overfit, and which 5 of 8 classes still inherit v1 behaviour end-to-end. The 11-doc partial corpus is acknowledged as smaller than the 20-doc spec target — the remaining 9 real PDFs are a sourcing exercise, not a code blocker.
 
+## Sprint 4.5 (v2) — Entity grounding + defaults flip + UI copy scrub
+
+Shipped via 5 phase tags (`phase-28.1-entity-schemas` → `phase-28.5-ui-copy-scrub`) plus a sixth phase-28.6 exit-gate commit on top of `v2.3-reranker`. Exit tag: `v2.4-grounding`.
+
+**Components landed:**
+- `src/interlock/llm_pipeline/schemas/entity.py` — `DetectedEntity` + `PageEntities` pydantic v2 models with kind enum validation
+- `src/interlock/llm_pipeline/entity_detect.py` — per-page Sonnet 4.5 entity detector. `detect_entities_for_doc()` parallel-per-page via `ThreadPoolExecutor(5)`. Diskcache namespace `llm-entities` keyed by (PDF path + page + page-text hash + prompt version + model). Stoplist filter drops standards bodies (IEEE/IEC/NEMA/ANSI/UL/NFPA) + generic words. Failure modes (API outage / parse / validation / inverted y) all collapse to `[]` for the page.
+- `src/interlock/llm_pipeline/prompts/entity_detect.md` — engineering-aware extractor prompt with kind classification rules (equipment / circuit / section / unknown) and explicit NOT-to-extract list.
+- `src/interlock/extract/entity_bind.py` — `bind_records_to_entities()` pure post-processor. Y-range enclosure with tightest-fit selection on multiple enclosures; nearest-y fallback on no enclosure. Preserves existing entity_tag (Track 1 leading-row marker wins).
+- `src/interlock/pipeline.py` — `use_entity_grounding` kwarg (default True); also flipped defaults to True on `classify_docs`, `use_llm_extraction`, `use_llm_reranker`, `use_llm_judge`. New `entity_detect` stage between `extract` and `align`.
+- `src/interlock/detect/significance.py` — fix `apply_judgment_to_flag` to preserve `provenance`, `rerank_rationale`, `pairing_confidence` (was dropping them on rebuild; masked while judge default was False, exposed when flipped to True).
+- `src/interlock/ui/app.py` — `Equipment-aware matching` sidebar toggle (default ON); per-flag `🏷️` chip in header (silent on untagged, single-chip on matched, A:/B: split on asymmetric); per-flag equipment-binding caption in expander; JSON export gains `entity_a` + `entity_b` keys; full jargon scrub (Track / Sprint / Phase / v1.5 references removed from every reviewer-facing string; preserved in code comments + AUTHORSHIP / TDD docs).
+
+**Defaults flip (architectural posture change):**
+- v2.4 default-on toggles: `classify_docs`, `use_llm_extraction`, `use_llm_reranker`, `use_entity_grounding`, `use_llm_judge`. The deployed Streamlit experience showcases the full AI stack on first load.
+- v1.5 back-compat path: every existing snapshot-equivalence test passes explicit `False` for the now-default-on toggles. The 354-test v2.2 invariant suite stays green.
+
+**Test surface delta:** +30 tests (9 entity schemas + 9 detector unit + 8 binding unit + 4 e2e integration). Live exit-gate tests (3, slow + needs_anthropic) all pass on Sonnet 4.5: two false-positive suppression cases (200/400 feeder, 77/42 motor FLA) + positive control (%Z mismatch preserved). Total v2 test count at `v2.4-grounding`: **408 passing** + live-API slow-marked suites.
+
+**Cost delta:** ~$0.005 per page Sonnet, ~$0.09 per cold review on the locked Option 1 fixture (18 pages total). Cached after first run.
+
+**Honest scope statement.** The detector handles equipment IDs the LLM has prior knowledge of (XFMR / M / P / F / JCN families + circuit labels). Asymmetric detection (entity found on Doc A but not Doc B's same page) means real mismatches can be misrouted to `unpaired_a/b` instead of forming a flag — honest gap > false positive, but not zero cost. See `docs/TDD.md` § "Known limits — Sprint 4.5 entity grounding (v2)" for the full disclosure.
+
 ## Sprint 4 (v2) — LLM pairing reranker
 
 Shipped via 4 phase tags (`phase-27.1-rerank-schemas` → `phase-27.4-rerank-ui`) plus a fifth phase-27.5 exit-gate commit on top of `v2.2-adjudicator`. Exit tag: `v2.3-reranker`.
