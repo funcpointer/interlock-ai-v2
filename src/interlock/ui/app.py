@@ -95,6 +95,25 @@ def _rerank_badge(flag: Any) -> str:
     return " · 🤖 Reranked"
 
 
+def _standards_chip(flag: Any) -> str:
+    """Return compact standards chip for the flag header.
+
+    Most-cited clause's short form → ' · 📜 <short>'.
+    Multiple cites → ' · 📜 <short> +N'.
+    Empty list → '' (silent).
+    """
+    cited = getattr(flag, "cited_clauses", ()) or ()
+    if not cited:
+        return ""
+    first = cited[0]
+    short = (first.source_name or "").split("§", 1)[0].strip().rstrip(",")
+    if not short:
+        short = first.clause_id
+    if len(cited) > 1:
+        return f" · 📜 {short} +{len(cited) - 1}"
+    return f" · 📜 {short}"
+
+
 def _entity_chip(flag: Any) -> str:
     """Return entity-tag chip text for the flag header.
 
@@ -279,6 +298,19 @@ with st.sidebar:
             "Toggle off for rule-only severity."
         ),
     )
+
+    project_id_input = st.text_input(
+        "Project ID (optional)",
+        value="",
+        placeholder="e.g. AES-PALM-2025",
+        help=(
+            "If your project has its own tolerance overrides at "
+            "fixtures/projects/<id>/tolerances.yaml, enter the ID here. "
+            "Leave blank to use the global standards registry only."
+        ),
+    )
+    # Normalize empty string → None for the pipeline.
+    project_id = project_id_input.strip() or None
 
     st.divider()
 
@@ -501,7 +533,7 @@ if run:
         "align": "Matching parameters across documents",
         "rerank": "Reviewing ambiguous pairs with AI",
         "detect": "Detecting mismatches",
-        "judge": "AI severity review",
+        "judge": "AI severity + standards citations",
     }
     _STAGE_ORDER: list[str] = ["ingest_a", "ingest_b", "extract"]
     if use_entity_grounding:
@@ -577,6 +609,7 @@ if run:
                 use_llm_extraction=use_llm_extraction,
                 use_llm_reranker=use_llm_reranker,
                 use_entity_grounding=use_entity_grounding,
+                project_id=project_id,
             )
             flags = review_result.flags
             status.update(
@@ -823,10 +856,12 @@ if flags:
         prov_badge = _provenance_badge(getattr(f, "provenance", "unknown"))
         # v2 Sprint 4.5: equipment-binding chip; silent when both sides untagged
         ent_chip = _entity_chip(f)
+        # v2 Sprint 5a: cited standards chip; silent when no citations
+        std_chip = _standards_chip(f)
         header = (
             f"{_SEVERITY[sev]['emoji']} **{f.parameter}** · "
             f"{dev_str} · confidence {f.confidence:.2f}"
-            f"{pair_badge}{prov_badge}{ent_chip}{verdict_badge}"
+            f"{pair_badge}{prov_badge}{ent_chip}{std_chip}{verdict_badge}"
         )
 
         with st.expander(
@@ -873,6 +908,16 @@ if flags:
                     f"🏷️ Equipment binding — Doc A: `{_a_tag or '—'}` · "
                     f"Doc B: `{_b_tag or '—'}`"
                 )
+
+            # v2 Sprint 5a: full list of cited standards.
+            _cited = getattr(f, "cited_clauses", ()) or ()
+            if _cited:
+                st.markdown("**📜 Cited standards:**")
+                for c in _cited:
+                    st.markdown(
+                        f"- **{c.source_name}** ({c.edition_year})  \n"
+                        f"  _{c.summary}_"
+                    )
 
             cit_a = None
             cit_b = None
@@ -954,6 +999,15 @@ if flags:
                         "rerank_rationale": getattr(f, "rerank_rationale", None),  # v2 Sprint 4
                         "entity_a": (getattr(f.a_record, "entity_tag", "") or None),  # v2 Sprint 4.5
                         "entity_b": (getattr(f.b_record, "entity_tag", "") or None),  # v2 Sprint 4.5
+                        "cited_clauses": [  # v2 Sprint 5a
+                            {
+                                "clause_id": c.clause_id,
+                                "edition_year": c.edition_year,
+                                "source_name": c.source_name,
+                                "summary": c.summary,
+                            }
+                            for c in (getattr(f, "cited_clauses", ()) or ())
+                        ],
                     }
                     st.rerun()
             with b_dismiss:
