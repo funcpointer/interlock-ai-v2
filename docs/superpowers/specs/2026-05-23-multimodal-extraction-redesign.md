@@ -25,7 +25,16 @@ Fixing it requires:
 7. **Pipeline-pass audit chain** so every Track's contribution to a flag is auditable and revertable.
 8. **Explicit no-overfitting test matrix** (§10) — design must pass synthetic cases across all four axes, not just the Option 1 false-positive.
 
-Estimated scope: 4 sprints (Sprint 7 audit + structure-classifier; Sprint 8 vision lane for diagrams + OCR-modality routing; Sprint 9 typed EntityRef + cross-doc resolution + project aliases; Sprint 10 test-matrix gold corpus).
+**Priority ordering** (per reviewer):
+- **P0:** version review (same-conv doc pairs like Option 1 60% vs 90%) + cross-doc review (different-conv pairs like spec ↔ study with `T-1` vs `XFMR-001`).
+- **P1:** OCR (scanned-no-text-layer pages).
+
+Estimated scope: 5 sprints, P0 first:
+- Sprint 7 — instrumentation (audit + structure classifier; no behavior change)
+- Sprint 8 — version-review correctness (vision lane for born-digital diagrams + EntityRef refactor) — **P0**
+- Sprint 9 — cross-doc resolution + per-project aliases — **P0**
+- Sprint 10 — OCR-modality lane — **P1**
+- Sprint 11 — test-matrix CI gates + calibration baseline
 
 ---
 
@@ -344,59 +353,80 @@ Loaded by entity-resolution stage (§4.6 layer 2) before LLM resolution fires. S
 
 ---
 
-## 5. Rollout plan (4 sprints)
+## 5. Rollout plan (5 sprints, ordered by P0 → P1)
 
-### Sprint 7 — Page-structure classifier + audit chain (no behavior change)
+**Priority ordering** (per reviewer):
+- **P0:** version-review correctness (same-conventions doc-pair, like Option 1 60% vs 90% revisions) + cross-doc review correctness (different-conventions doc-pair, like spec ↔ study with `T-1` vs `XFMR-001`).
+- **P1:** OCR (scanned-no-text-layer pages).
 
-**Goal:** Ship instrumentation. No flag set changes. Reviewer can see what each Track did + page structure routing decision.
+Roadmap re-sequenced so cross-doc + version review ship before OCR.
 
-- Page-structure heuristic classifier (already prototyped in `scripts/diagnose_page_structures.py`). Emits source × layout label per page; nothing routes yet.
-- Source detection: PyMuPDF coverage check (already exists for Phase 20 vision-OCR threshold) + layout classifier (prose / table / diagram / mixed).
+### Sprint 7 — Instrumentation (no behavior change)
+
+**Goal:** Ship audit chain + page-structure classifier so every subsequent P0/P1 sprint is measurable. No flag set changes; reviewer sees what each Track did.
+
+- Page-structure classifier (prototyped in `scripts/diagnose_page_structures.py`). Emits source × layout label per page; nothing routes yet.
+- Source detection: PyMuPDF coverage check (exists for Phase 20 vision-OCR threshold) + layout classifier (prose / table / diagram / mixed).
 - Audit chain plumbing: `Flag.audit_chain` field; each Track writes to it; UI surfaces the chain in the per-flag expander.
-- Reviewer sees the existing bad behavior, attributed to the right step.
+- Reviewer sees the existing v2.7 bad behavior, attributed to the right step.
 
 Cost: $0 incremental. Time: 2-3 days.
 
-### Sprint 8 — Vision extraction lane (diagrams) + OCR-modality lane (scanned-no-text)
+### Sprint 8 — Version-review correctness (P0)
 
-**Goal:** Eliminate the coordinate-space mismatch on diagrams AND give scanned-no-text pages a real entity-grounding path.
+**Goal:** Fix the reported LPS-RK demo bug + every same-conventions version-review failure mode. Born-digital diagram pages get the vision lane; born-digital prose/table pages keep current lanes.
 
-- Vision extraction module (§4.3): Sonnet 4.5 Vision call per diagram page, returns structured `(entity_kind, entity_id, parameter, value, visual_evidence)` tuples. ~$0.02 per diagram page; cached.
-- OCR-modality lane (§4.7): Phase 20's vision-OCR fallback prompt extended to return per-token bboxes. Span-identity binding works on OCR'd pages the same as born-digital. ~$0 incremental (same call, richer schema).
-- Pipeline routes pages by the source × layout matrix (§4.2). Born-digital prose / table pages stay on current lanes.
+- Vision extraction module (§4.3): Sonnet 4.5 Vision call per born-digital diagram page; returns structured `(entity_kind, entity_id, parameter, value, visual_evidence)` tuples. ~$0.02 per diagram page; cached.
+- Page-routing matrix (§4.2) activated **for born-digital pages only** (rows 1+2 of the source axis). OCR rows deferred to Sprint 10.
+- EntityRef refactor (preparatory): introduce `ParameterRecord.entity: EntityRef | None` alongside legacy `entity_tag: str`; back-compat shim populates both fields from current detector output. Consumers updated lazily over Sprints 8-9.
+- Span-identity binding (§4.1 option A) replaces y-binding for vision-lane records.
+- Per-cell gold fixtures + CI gates for §10 matrix cells **1, 2, 3, 5** (born-digital prose / table / diagram × single-doc / same-conv).
 - Live exit gates:
-  - Born-digital diagram: user's `LPS-RK-400SP vs LPS-RK-100SP` false positive does NOT surface.
-  - Scanned diagram (synthesized fixture): same false positive shape on a scanned page does NOT surface.
-  - Mixed-source PDF: each page routes independently; flags from each page carry the right `extraction_lane` audit-chain step.
+  - User's `LPS-RK-400SP vs LPS-RK-100SP` false positive does NOT surface.
+  - Existing v2.7 snapshot equivalence preserved on the locked Option 1 fixture cells 1-3 (no regression).
 
-Cost: ~$0.14 per cold review on a 9-page coordination study (7 diagram pages × $0.02). Cached. Time: 1 sprint.
+Cost: ~$0.14 per cold review on a 9-page coordination study (7 diagram pages × $0.02). Time: 1.5 weeks.
 
-### Sprint 9 — Typed EntityRef + cross-doc resolution + per-project aliases
+### Sprint 9 — Cross-doc-review correctness (P0)
 
-**Goal:** Replace flat `entity_tag: str` with `EntityRef` everywhere; add cross-doc entity resolution as a first-class pipeline stage; support reviewer-declared aliases.
+**Goal:** Different-conventions doc pairs work. Doc A's `T-1` resolves to Doc B's `XFMR-001`. Reviewer-declared aliases override.
 
-- Refactor `ParameterRecord.entity_tag` → `ParameterRecord.entity: EntityRef | None`. Phased back-compat shims.
-- Update Phase 19 alignment + Sprint 4 reranker + Sprint 4.5 grounding + Sprint 5a/5b/6 modules to consume `EntityRef`.
-- New cross-doc entity-resolution stage (§4.6): three-layer (exact / project-alias / LLM-resolved). ~$0.01 per doc-pair cold; cached on entity-list hashes.
+- Cross-doc entity resolution stage (§4.6): three-layer (exact / project-alias / LLM-resolved). ~$0.01 per doc-pair cold; cached on entity-list hashes.
 - Per-project entity-alias YAML (§4.8): `fixtures/projects/<id>/entity_aliases.yaml`. Loaded by resolution stage.
+- Complete the EntityRef refactor started in Sprint 8: drop legacy `entity_tag: str` once all consumers (Phase 19 alignment, Sprint 4 reranker, Sprint 4.5 grounding, Sprint 5a-6 modules) consume `EntityRef`.
 - Audit chain entries become richer (entity creation, alias hit, LLM resolution mapping with rationale).
-- UI: "Entity resolution" expander shows the resolved mapping with confidence + override hint.
+- UI: "Entity resolution" expander shows the resolved mapping with confidence + override hint. Sidebar Project ID input (already exists for tolerances) now also picks up alias file automatically.
+- Per-cell gold fixtures + CI gates for §10 matrix cells **4, 6, 15, 16** (different-conv, asymmetric scope, mixed real-project pairs).
 - Live exit gates:
-  - Same-conventions doc-pair: existing behavior preserved (regression test).
-  - Different-conventions doc-pair (synthetic Doc A `T-1` vs Doc B `XFMR-001`): pair resolves correctly via LLM, flags surface.
-  - Project-alias override: declared alias takes precedence over LLM resolution.
+  - Same-conventions doc-pair: Sprint 8 behavior preserved.
+  - Different-conventions synthetic pair (Doc A `T-1` vs Doc B `XFMR-001`): pair resolves correctly via LLM resolution layer; flags surface.
+  - Project-alias override: declared alias overrides LLM resolution; verified on a synthetic pair where LLM resolution is intentionally wrong + alias corrects it.
 
-Cost: ~$0.01 per cold review (resolution call). Time: ~2 weeks (large refactor).
+Cost: ~$0.01 per cold review (resolution call). Time: ~2 weeks (large refactor + LLM resolution prompt iteration).
 
-### Sprint 10 — Test-matrix gold corpus + CI gates
+### Sprint 10 — OCR-modality lane (P1)
 
-**Goal:** Validate the multi-modal pipeline against the §3.5 scope axes; gate every commit.
+**Goal:** Scanned-no-text-layer pages get a real entity-grounding path. Mixed-source PDFs (cover scanned, body born-digital) handled gracefully.
 
-- Synthesize / source fixtures for each cell of the §10 test matrix (born-digital prose / table / diagram × scanned-OCR × same-conventions / different-conventions / asymmetric-quality).
-- Per-matrix-cell gold flag YAML in `fixtures/eval/gold_flags/`, leveraging Sprint 6's per-class harness.
+- OCR-modality lane (§4.7): Phase 20's vision-OCR fallback prompt extended to return per-token bboxes. Span-identity binding now works on OCR'd pages the same as born-digital. ~$0 incremental cost (same call, richer schema) — assuming Sonnet 4.5 Vision per-token bbox output is reliable (open question §9).
+- Routing matrix activated for OCR rows (rows 3+4 of source axis).
+- Per-cell gold fixtures + CI gates for §10 cells **7-14** (scanned-sidecar + scanned-no-text + mixed-source cells).
+- Live exit gates:
+  - Pure-scanned pair (synthesized): entity resolution + value extraction work end-to-end.
+  - Mixed-source pair: each page routes independently; per-flag audit chain shows extraction_lane.
+- Fallback: if Sonnet 4.5 Vision per-token bbox proves unreliable, OCR records carry `bbox=(0,0,page_w,page_h)` (current behavior) and entity binding falls back to text proximity within the OCR'd span. Documented as known limit.
+
+Cost: same as Phase 20 vision-OCR (~$0.005/page); cached. Time: ~1 week + corpus-sourcing tail.
+
+### Sprint 11 — Test-matrix CI gates + calibration baseline
+
+**Goal:** Lock the 16-cell §10 matrix into CI. Per-sprint contribution deltas required on every PR.
+
+- All 16 cells from §10 matrix have ≥ 1 fixture + gold flags by this sprint.
 - CI gate: precision ≥ 0.8 / recall ≥ 0.7 per matrix cell with ≥ 5 cases (xfail-soft on sparse cells).
 - Audit-chain regression test: every flag in every matrix cell has a complete audit chain entry per Track.
 - Calibration report (Sprint 6 reuse): per-matrix-cell Brier breakdown.
+- PR template adds checkbox: "per-cell delta report attached (Sprint 7+ requirement)".
 
 Cost: $0 incremental code; corpus growth is content sourcing. Time: 2 weeks.
 
@@ -491,11 +521,20 @@ Before approval, attacking the design's own weaknesses:
 - Per-class gold YAML in `fixtures/eval/gold_flags/<cell_id>.yaml` (Sprint 6 schema).
 - CI gate: precision ≥ 0.8 / recall ≥ 0.7 once cell has ≥ 5 labelled cases.
 
+**Per-sprint cell coverage** (P0 → P1):
+
+| Sprint | Goal | Cells primarily exercised |
+|---|---|---|
+| 7 | Audit instrumentation (no behavior change) | All existing cells; baseline metrics captured |
+| 8 — P0 | Version review (born-digital diagram vision lane) | **1, 2, 3, 5** must improve or hold; no regression on 1-3 |
+| 9 — P0 | Cross-doc resolution + project aliases | **4, 6, 15, 16** must improve; no regression on 1-5 |
+| 10 — P1 | OCR-modality lane | **7-14** must improve; no regression on 1-6, 15, 16 |
+| 11 | CI gates lock the matrix | All 16 cells gated |
+
 **Anti-overfitting discipline:**
-- Sprint 7 audit chain ships → run on **every existing cell**; document baseline metrics per cell.
-- Sprint 8 vision lane ships → must improve cells 5 + 6 + 12 + 16 by ≥ 1 metric point each, AND not regress cells 1-3 + 9 by more than 0.05.
-- Sprint 9 cross-doc resolution ships → must improve cells 4 + 6 + 14 + 16 by ≥ 1 metric point each, AND not regress others.
-- Sprint 10 makes the matrix CI-gated.
+- No PR merges (Sprint 7+) without a per-cell delta report attached.
+- Each sprint's exit gate fails if it improves its target cells but regresses any non-target cell by more than 0.05 metric points.
+- This is the discipline that prevents the design from drifting back into overfitting to one demo fixture.
 
 **No PR merges (Sprint 7+) without** a per-cell delta report attached. This is the discipline that prevents the design from drifting back into overfitting to one demo fixture.
 
