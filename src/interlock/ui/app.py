@@ -62,9 +62,9 @@ _SEVERITY_ORDER = {"critical": 0, "major": 1, "minor": 2, "info": 3}
 # every label including the defensive "unknown".
 _TRACK_FILTER_MAP: dict[str, set[str]] = {
     "All": {"rule_only", "llm_only", "mixed_track", "unknown"},
-    "Deterministic only": {"rule_only"},
-    "AI-only": {"llm_only"},
-    "Hybrid sources": {"mixed_track"},
+    "Rules only": {"rule_only"},
+    "AI only": {"llm_only"},
+    "Mixed sources": {"mixed_track"},
 }
 
 
@@ -75,9 +75,9 @@ def _provenance_badge(provenance: str) -> str:
     mirroring Phase 19's ⚠️ weak-pair pattern.
     """
     if provenance == "llm_only":
-        return " · 🧠 AI-only"
+        return " · 🧠 AI only"
     if provenance == "mixed_track":
-        return " · 🔀 Hybrid sources"
+        return " · 🔀 Mixed sources"
     return ""
 
 
@@ -197,14 +197,13 @@ with st.sidebar:
     # --- Input handling ---------------------------------------------------
 
     classify_docs = st.toggle(
-        "Doc-class routing (v2 Sprint 1)",
+        "Doc-class routing",
         value=True,
         help=(
-            "When ON, each PDF is classified on upload (one VLM call per "
-            "doc, diskcached on content hash) and per-class tolerance "
-            "bands + authority hierarchy apply where defined. When OFF, "
-            "behaves bit-identically to v1.5-mvp-ready. Unknown "
-            "classifications fall back to v1 defaults regardless."
+            "When ON, each PDF is classified on upload and per-class "
+            "tolerance bands + authority hierarchy apply where defined. "
+            "When OFF, the review uses generic defaults. Unknown "
+            "classifications fall back to defaults regardless."
         ),
     )
 
@@ -238,29 +237,14 @@ with st.sidebar:
 
     # --- Analysis depth ---------------------------------------------------
 
-    use_llm_judge = st.toggle(
-        "AI-judged severity + downstream-effect propagation",
+    use_llm_extraction = st.toggle(
+        "AI parameter extraction",
         value=True,
         help=(
-            "Each surfaced flag is sent to Claude Opus 4.7 with a cached "
-            "engineering ontology, returning a written rationale and a list "
-            "of downstream parameters that may be affected. **First run** "
-            "costs ~$0.02–0.05 per flag; results are diskcached per flag so "
-            "subsequent runs on the same flag set are free.\n\n"
-            "Toggle off for a fully deterministic, rule-only severity path."
-        ),
-    )
-
-    use_llm_extraction = st.toggle(
-        "Track 2 LLM extraction (v2 Sprint 2)",
-        value=False,
-        help=(
-            "Run per-page Claude Sonnet 4.5 extraction in addition to the "
-            "regex extractor. Recovers parameters from prose-heavy documents "
-            "(SEL papers, study narratives) that the regex layer misses. "
-            "Diskcached per page on PDF content hash + prompt version; cold "
-            "run on a 30-page PDF costs ~$0.10–$0.30, warm $0.\n\n"
-            "Toggle off to run Track 1 only (bit-identical to v1.5-mvp-ready)."
+            "Recovers parameters from prose-heavy documents that pattern "
+            "rules miss. Cold cost ~$0.10–$0.30 per 30-page PDF; cached "
+            "after first run.\n\n"
+            "Toggle off to disable AI extraction."
         ),
     )
 
@@ -276,15 +260,23 @@ with st.sidebar:
     )
 
     use_llm_reranker = st.toggle(
-        "Track 2 LLM pairing reranker (v2 Sprint 4)",
-        value=False,
+        "AI pairing review",
+        value=True,
         help=(
-            "When a pair has low Track 1 pairing_confidence (< 0.75), send "
-            "both records' context to Claude Sonnet 4.5. The reranker scores "
-            "the pair, writes a one-paragraph rationale, and may decline to "
-            "pair (drops the candidate flag). Replaces the generic "
-            "⚠️ weak pair badge with reasoned verdicts.\n\n"
-            "Cost: ~$0.005 per weak pair, diskcached per (record, record)."
+            "When automatic matching is uncertain, asks AI to verify each "
+            "pair with reasoning. Replaces generic ⚠️ pairing warnings "
+            "with explanations. Cold cost ~$0.005 per uncertain pair; "
+            "cached."
+        ),
+    )
+
+    use_llm_judge = st.toggle(
+        "AI severity + downstream effects",
+        value=True,
+        help=(
+            "AI rationale per flag + dependent-parameter callouts. Cold "
+            "cost ~$0.02–$0.05 per flag; cached.\n\n"
+            "Toggle off for rule-only severity."
         ),
     )
 
@@ -311,20 +303,18 @@ with st.sidebar:
     # --- v2 Sprint 3: provenance filter ---------------------------------
 
     track_filter = st.radio(
-        "Filter by track",
-        options=("All", "Deterministic only", "AI-only", "Hybrid sources"),
+        "Filter by source",
+        options=("All", "Rules only", "AI only", "Mixed sources"),
         index=0,
         help=(
-            "Narrow the visible flag list by which track(s) contributed. "
-            "Both Track 1 (regex) and Track 2 (LLM) always run when "
-            "enabled in the upper sidebar — this filter only changes "
-            "what you SEE, not what gets computed."
+            "Narrow the visible flag list by which source(s) contributed. "
+            "Both rule-based and AI extraction run when their toggles are "
+            "on above — this filter only changes what you SEE, not "
+            "what gets computed."
         ),
     )
     st.caption(
-        "⚙ Deterministic = rules found both sides · "
-        "🧠 AI-only = LLM found both sides · "
-        "🔀 Hybrid sources = rules + LLM, one side each"
+        "⚙ Rules only · 🧠 AI only · 🔀 Mixed sources"
     )
 
     st.divider()
@@ -501,14 +491,17 @@ if run:
     # placeholders, st.status writes accumulate top-to-bottom and you can
     # only ever see "running" or "done" for the whole block, not each step.
     _STAGE_LABELS: dict[str, str] = {
-        "ingest_a": "Ingesting Doc A (PyMuPDF spans + Camelot tables)",
-        "ingest_b": "Ingesting Doc B (PyMuPDF spans + Camelot tables)",
-        "extract": "Extracting parameters (regex patterns + Pint unit normalisation)",
+        "ingest_a": "Reading Doc A (text spans + tables)",
+        "ingest_b": "Reading Doc B (text spans + tables)",
+        "classify": "Classifying document types (AI)",
+        "extract": "Extracting parameters",
+        "llm_extract_a": "AI parameter extraction — Doc A",
+        "llm_extract_b": "AI parameter extraction — Doc B",
         "entity_detect": "Detecting equipment IDs (AI)",
-        "align": "Aligning across documents (exact name + canonical glossary + Voyage embeddings)",
-        "rerank": "Reranking weak Track 1 pairs (Claude Sonnet 4.5, parallel × 5, cached)",
-        "detect": "Detecting mismatches + classifying severity (IEEE / IEC tolerance bands)",
-        "judge": "LLM significance judgement (Claude, cached per flag)",
+        "align": "Matching parameters across documents",
+        "rerank": "Reviewing ambiguous pairs with AI",
+        "detect": "Detecting mismatches",
+        "judge": "AI severity review",
     }
     _STAGE_ORDER: list[str] = ["ingest_a", "ingest_b", "extract"]
     if use_entity_grounding:
@@ -727,9 +720,9 @@ if flags:
     )
 
     judge_caption = (
-        "AI-judged severity + downstream effects"
+        "AI severity + downstream effects"
         if st.session_state.get("use_llm_judge_at_run")
-        else "Rule-based severity (deterministic mode)"
+        else "Rule-only severity"
     )
     st.caption(judge_caption)
 
@@ -857,17 +850,14 @@ if flags:
             # v2 Sprint 3: per-flag track detail (silent on rule_only/unknown)
             prov = getattr(f, "provenance", "unknown")
             if prov == "llm_only":
-                cap += (
-                    " · Track provenance: 🧠 AI-only — both sides extracted "
-                    "by the LLM layer (Sprint 2)"
-                )
+                cap += " · Both sides found by AI"
             elif prov == "mixed_track":
                 a_prov_human = "Rules" if f.a_record.provenance == "regex" else "AI"
                 b_prov_human = "Rules" if f.b_record.provenance == "regex" else "AI"
                 cap += (
-                    f" · Track provenance: 🔀 Hybrid — Doc A={a_prov_human} · "
-                    f"Doc B={b_prov_human}. Verify these two records describe "
-                    f"the same physical parameter."
+                    f" · Mixed sources — Doc A: {a_prov_human} · "
+                    f"Doc B: {b_prov_human}. Verify these two records "
+                    f"describe the same physical parameter."
                 )
             st.caption(cap)
 
