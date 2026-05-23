@@ -3,6 +3,7 @@ plumbing. Mocked Anthropic calls so tests stay fast and offline."""
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -586,3 +587,209 @@ def test_use_llm_judge_false_keeps_cited_clauses_empty(mocker) -> None:  # type:
     assert spy.call_count == 0
     for f in result.flags:
         assert f.cited_clauses == ()
+
+
+# --- Sprint 8: vision lane integration --------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _vision_lane_cache_clear() -> None:
+    """Sprint 8 — keep llm-vision + page-structure caches fresh per test.
+    Global vision_extract_page stub lives in tests/conftest.py."""
+    disk_cache.clear_namespace("llm-vision")
+    disk_cache.clear_namespace("page-structure")
+    yield
+    disk_cache.clear_namespace("llm-vision")
+    disk_cache.clear_namespace("page-structure")
+
+
+def _fake_vision_response(entity_id: str, value: str, page: int = 1) -> MagicMock:
+    content = MagicMock()
+    content.text = json.dumps({
+        "page": page, "page_understanding": "x", "page_layout": "diagram",
+        "claims": [{
+            "entity_kind": "equipment", "entity_id": entity_id,
+            "entity_location_hint": "", "parameter_name": "Fuse Designation",
+            "raw_value": value, "visual_evidence": "Label below symbol.",
+        }],
+    })
+    return MagicMock(content=[content])
+
+
+@pytest.mark.vision_lane
+def test_use_vision_lane_false_skips_vision_calls(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Opt-out preserves v2.7 behavior (no vision calls)."""
+    from interlock.pipeline import review_two_documents_full
+    spy = mocker.patch("interlock.llm_pipeline.vision_extract._call_claude_vision")
+    review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
+        use_vision_lane=False,
+    )
+    assert spy.call_count == 0
+
+
+@pytest.mark.vision_lane
+def test_use_vision_lane_true_routes_diagram_pages(mocker) -> None:  # type: ignore[no-untyped-def]
+    """When vision lane on + page is diagram → vision call runs."""
+    from interlock.pipeline import review_two_documents_full
+    mocker.patch(
+        "interlock.llm_pipeline.page_classify.classify_page_structure",
+        return_value="diagram",
+    )
+    spy = mocker.patch(
+        "interlock.llm_pipeline.vision_extract._call_claude_vision",
+        return_value=_fake_vision_response("LPS-RK-100SP", "LPS-RK-100SP"),
+    )
+    review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
+        use_vision_lane=True,
+    )
+    assert spy.call_count > 0
+
+
+@pytest.mark.vision_lane
+def test_vision_lane_only_routes_diagram_pages(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Prose / table pages do NOT invoke vision."""
+    from interlock.pipeline import review_two_documents_full
+    def _stub_classify(_pdf, page):  # type: ignore[no-untyped-def]
+        return {1: "prose", 2: "table", 3: "diagram"}.get(page, "mixed")
+    mocker.patch(
+        "interlock.llm_pipeline.page_classify.classify_page_structure",
+        side_effect=_stub_classify,
+    )
+    spy = mocker.patch(
+        "interlock.llm_pipeline.vision_extract._call_claude_vision",
+        return_value=_fake_vision_response("X", "X"),
+    )
+    review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
+        use_vision_lane=True,
+    )
+    # Doc has 9 pages; only page 3 of each is diagram → 2 vision calls max.
+    # (Could be fewer if cache hits or page text is empty.)
+    assert spy.call_count <= 2
+
+
+@pytest.mark.vision_lane
+def test_vision_records_carry_entity_tag_and_extraction_lane(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Vision-extracted records arrive in the pipeline with both fields set."""
+    from interlock.extract.parameters import ParameterRecord
+    from interlock.pipeline import review_two_documents_full
+    mocker.patch(
+        "interlock.llm_pipeline.page_classify.classify_page_structure",
+        return_value="diagram",
+    )
+    # Bypass the hallucination guard (page-text substring check) by
+    # patching vision_extract_page directly. Doc-A and Doc-B records
+    # differ in raw_value so the aligner pairs them and the detector
+    # emits a real mismatch flag — making the records observable via
+    # the ReviewResult surface.
+    fake_record_a = ParameterRecord(
+        doc_id="doc_a", page=1, bbox=(0.0, 0.0, 0.0, 0.0), section=None,
+        span_text="vision evidence A", name="Fuse Designation",
+        raw_value="LPS-RK-100SP", normalized_magnitude=None,
+        normalized_unit=None, source_path="", entity_tag="XFMR-VLAB-001",
+        provenance="llm", extraction_lane="vision",
+    )
+    fake_record_b = ParameterRecord(
+        doc_id="doc_b", page=1, bbox=(0.0, 0.0, 0.0, 0.0), section=None,
+        span_text="vision evidence B", name="Fuse Designation",
+        raw_value="LPS-RK-400SP", normalized_magnitude=None,
+        normalized_unit=None, source_path="", entity_tag="XFMR-VLAB-001",
+        provenance="llm", extraction_lane="vision",
+    )
+
+    def _fake_vision_records(pdf_path: str, page: int, *, doc_id: str = "") -> list[ParameterRecord]:
+        if doc_id == "doc_a":
+            return [fake_record_a]
+        if doc_id == "doc_b":
+            return [fake_record_b]
+        return []
+
+    mocker.patch(
+        "interlock.llm_pipeline.vision_extract.vision_extract_page",
+        side_effect=_fake_vision_records,
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
+        use_vision_lane=True,
+        suppress_info=False,
+    )
+    all_records = list(result.unpaired_a) + list(result.unpaired_b) + [
+        r for f in result.flags for r in (f.a_record, f.b_record)
+    ]
+    vision_records = [r for r in all_records if r.extraction_lane == "vision"]
+    assert vision_records, "expected at least one vision-source record"
+    for r in vision_records:
+        assert r.entity_tag, "vision record must carry entity_tag from entity_id"
+
+
+@pytest.mark.vision_lane
+def test_vision_lane_kills_lps_rk_demo_bug(mocker) -> None:  # type: ignore[no-untyped-def]
+    """The reported v2.7 demo bug: LPS-RK-400SP ≠ LPS-RK-100SP false
+    positive on the locked Option 1 fixture. With vision lane ON, this
+    pair should NOT surface as a mismatch flag — vision returns
+    LPS-RK-400SP and LPS-RK-100SP as separate equipment entities with
+    matching raw_values across docs."""
+    from interlock.pipeline import review_two_documents_full
+
+    fake_resp = MagicMock(content=[MagicMock(text=json.dumps({
+        "page": 6, "page_understanding": "TCC2", "page_layout": "diagram",
+        "claims": [
+            {"entity_kind": "equipment", "entity_id": "LPS-RK-400SP",
+             "entity_location_hint": "", "parameter_name": "Fuse Designation",
+             "raw_value": "LPS-RK-400SP", "visual_evidence": "below 400A feeder"},
+            {"entity_kind": "equipment", "entity_id": "LPS-RK-100SP",
+             "entity_location_hint": "", "parameter_name": "Fuse Designation",
+             "raw_value": "LPS-RK-100SP", "visual_evidence": "above #1 THW"},
+        ],
+    }))])
+    mocker.patch(
+        "interlock.llm_pipeline.page_classify.classify_page_structure",
+        return_value="diagram",
+    )
+    mocker.patch(
+        "interlock.llm_pipeline.vision_extract._call_claude_vision",
+        return_value=fake_resp,
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
+        use_vision_lane=True,
+    )
+    for f in result.flags:
+        a_val = (f.a_record.raw_value or "").upper()
+        b_val = (f.b_record.raw_value or "").upper()
+        is_bad = (
+            "LPS-RK-400SP" in a_val and "LPS-RK-100SP" in b_val
+        ) or (
+            "LPS-RK-100SP" in a_val and "LPS-RK-400SP" in b_val
+        )
+        assert not is_bad, (
+            f"v2.7 demo bug regressed: {f.parameter} "
+            f"A={f.a_record.raw_value} vs B={f.b_record.raw_value}"
+        )

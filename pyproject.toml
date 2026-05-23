@@ -44,6 +44,7 @@ testpaths = ["tests"]
 addopts = "-ra -q -m 'not slow'"
 markers = [
   "slow: perf budgets / full-pipeline timings; can spike under cumulative-suite Voyage load. Run via `uv run pytest -m slow`.",
+  "vision_lane: Sprint 8 — test exercises real vision_extract_page path; autouse stub is skipped for these.",
 ]
 
 [tool.hatch.build.targets.wheel]

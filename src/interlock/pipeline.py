@@ -78,6 +78,7 @@ def review_two_documents_full(
     use_llm_reranker: bool = True,         # v2.4: flipped to True
     use_entity_grounding: bool = True,     # v2.4: new, default True
     project_id: str | None = None,         # v2 Sprint 5a — clause-registry project override
+    use_vision_lane: bool = True,          # v2 Sprint 8 — vision lane on diagram pages
 ) -> ReviewResult:
     """Run end-to-end review.
 
@@ -156,6 +157,39 @@ def review_two_documents_full(
     pa = extract_parameters(ia.spans)
     pb = extract_parameters(ib.spans)
     _stage("extract", "done")
+
+    # v2 Sprint 8: vision lane for diagram pages. Runs BEFORE Track 2 LLM
+    # text extraction so vision-sourced records sit alongside Track 2's
+    # text extraction. Per-page routing — only diagram pages call vision.
+    if use_vision_lane:
+        import fitz
+        from interlock.llm_pipeline.page_classify import classify_page_structure
+        from interlock.llm_pipeline.vision_extract import vision_extract_page
+        _stage("vision_extract", "start")
+
+        def _vision_records_for_doc(pdf_path: str, doc_id: str) -> list[ParameterRecord]:
+            try:
+                doc = fitz.open(pdf_path)
+                n_pages = doc.page_count
+                doc.close()
+            except Exception:
+                return []
+            out: list[ParameterRecord] = []
+            for p in range(1, n_pages + 1):
+                try:
+                    if classify_page_structure(pdf_path, p) != "diagram":
+                        continue
+                    out.extend(vision_extract_page(pdf_path, p, doc_id=doc_id))
+                except Exception:
+                    continue
+            return out
+
+        try:
+            pa = pa + _vision_records_for_doc(pdf_a, doc_a_id)
+            pb = pb + _vision_records_for_doc(pdf_b, doc_b_id)
+        except Exception:
+            pass  # graceful fallback
+        _stage("vision_extract", "done")
 
     # v2 Sprint 2: Track 2 LLM extraction (opt-in via use_llm_extraction).
     # Records appended after Track 1; alignment sees the union.
@@ -300,6 +334,7 @@ def review_two_documents(
     use_llm_reranker: bool = True,         # v2.4: flipped to True
     use_entity_grounding: bool = True,     # v2.4: new, default True
     project_id: str | None = None,         # v2 Sprint 5a — clause-registry project override
+    use_vision_lane: bool = True,          # v2 Sprint 8 — vision lane on diagram pages
 ) -> list[Flag]:
     """Back-compat shim: returns only the flag list.
 
@@ -327,4 +362,5 @@ def review_two_documents(
         use_llm_reranker=use_llm_reranker,
         use_entity_grounding=use_entity_grounding,
         project_id=project_id,
+        use_vision_lane=use_vision_lane,
     ).flags
