@@ -95,6 +95,24 @@ def _rerank_badge(flag: Any) -> str:
     return " · 🤖 Reranked"
 
 
+def _entity_chip(flag: Any) -> str:
+    """Return entity-tag chip text for the flag header.
+
+    Same-tag both sides → ' · 🏷️ <tag>'.
+    Different tags → ' · 🏷️ A:<a> / B:<b>' (rare; detector asymmetry).
+    Both empty → '' (silent — most flags pre-grounding).
+    """
+    a_tag = (getattr(flag.a_record, "entity_tag", "") or "").strip()
+    b_tag = (getattr(flag.b_record, "entity_tag", "") or "").strip()
+    if not a_tag and not b_tag:
+        return ""
+    if a_tag and b_tag and a_tag == b_tag:
+        return f" · 🏷️ {a_tag}"
+    if a_tag and b_tag:
+        return f" · 🏷️ A:{a_tag} / B:{b_tag}"
+    return f" · 🏷️ {a_tag or b_tag}"
+
+
 # ----------------------------------------------------------------------
 # Per-session workdir (PDFs must survive across Streamlit reruns so the
 # citation renderer can still find them when the reviewer clicks
@@ -243,6 +261,17 @@ with st.sidebar:
             "Diskcached per page on PDF content hash + prompt version; cold "
             "run on a 30-page PDF costs ~$0.10–$0.30, warm $0.\n\n"
             "Toggle off to run Track 1 only (bit-identical to v1.5-mvp-ready)."
+        ),
+    )
+
+    use_entity_grounding = st.toggle(
+        "Equipment-aware matching",
+        value=True,
+        help=(
+            "Detects equipment IDs on each page and refuses to pair "
+            "values across different physical equipment. Catches "
+            "cross-instance false positives. Cold cost ~$0.005 per "
+            "page; cached."
         ),
     )
 
@@ -475,12 +504,16 @@ if run:
         "ingest_a": "Ingesting Doc A (PyMuPDF spans + Camelot tables)",
         "ingest_b": "Ingesting Doc B (PyMuPDF spans + Camelot tables)",
         "extract": "Extracting parameters (regex patterns + Pint unit normalisation)",
+        "entity_detect": "Detecting equipment IDs (AI)",
         "align": "Aligning across documents (exact name + canonical glossary + Voyage embeddings)",
         "rerank": "Reranking weak Track 1 pairs (Claude Sonnet 4.5, parallel × 5, cached)",
         "detect": "Detecting mismatches + classifying severity (IEEE / IEC tolerance bands)",
         "judge": "LLM significance judgement (Claude, cached per flag)",
     }
-    _STAGE_ORDER: list[str] = ["ingest_a", "ingest_b", "extract", "align"]
+    _STAGE_ORDER: list[str] = ["ingest_a", "ingest_b", "extract"]
+    if use_entity_grounding:
+        _STAGE_ORDER.append("entity_detect")
+    _STAGE_ORDER.append("align")
     if use_llm_reranker:
         _STAGE_ORDER.append("rerank")
     _STAGE_ORDER.append("detect")
@@ -550,6 +583,7 @@ if run:
                 classify_docs=classify_docs,
                 use_llm_extraction=use_llm_extraction,
                 use_llm_reranker=use_llm_reranker,
+                use_entity_grounding=use_entity_grounding,
             )
             flags = review_result.flags
             status.update(
@@ -794,10 +828,12 @@ if flags:
         pair_badge = rerank_b if rerank_b else (" · ⚠️ weak pair" if weak_pair else "")
         # v2 Sprint 3: silent on rule_only, prominent on llm_only / mixed_track
         prov_badge = _provenance_badge(getattr(f, "provenance", "unknown"))
+        # v2 Sprint 4.5: equipment-binding chip; silent when both sides untagged
+        ent_chip = _entity_chip(f)
         header = (
             f"{_SEVERITY[sev]['emoji']} **{f.parameter}** · "
             f"{dev_str} · confidence {f.confidence:.2f}"
-            f"{pair_badge}{prov_badge}{verdict_badge}"
+            f"{pair_badge}{prov_badge}{ent_chip}{verdict_badge}"
         )
 
         with st.expander(
@@ -838,6 +874,15 @@ if flags:
             # v2 Sprint 4: surface reranker rationale prominently when present.
             if getattr(f, "rerank_rationale", None):
                 st.info(f"🤖 **Reranker:** {f.rerank_rationale}")
+
+            # v2 Sprint 4.5: per-flag equipment binding line (silent both empty)
+            _a_tag = (getattr(f.a_record, "entity_tag", "") or "").strip()
+            _b_tag = (getattr(f.b_record, "entity_tag", "") or "").strip()
+            if _a_tag or _b_tag:
+                st.caption(
+                    f"🏷️ Equipment binding — Doc A: `{_a_tag or '—'}` · "
+                    f"Doc B: `{_b_tag or '—'}`"
+                )
 
             cit_a = None
             cit_b = None
@@ -917,6 +962,8 @@ if flags:
                         "doc_b_value": f.b_record.raw_value,
                         "provenance": getattr(f, "provenance", "unknown"),  # v2 Sprint 3
                         "rerank_rationale": getattr(f, "rerank_rationale", None),  # v2 Sprint 4
+                        "entity_a": (getattr(f.a_record, "entity_tag", "") or None),  # v2 Sprint 4.5
+                        "entity_b": (getattr(f.b_record, "entity_tag", "") or None),  # v2 Sprint 4.5
                     }
                     st.rerun()
             with b_dismiss:
