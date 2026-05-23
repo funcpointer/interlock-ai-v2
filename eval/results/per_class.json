@@ -1,0 +1,21 @@
+[
+  {
+    "file": "fixtures/eval/gold_flags/coordination_study.yaml",
+    "doc_class": "coordination_study",
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "per_pair": [
+      {
+        "pair_id": "option1-60vs90",
+        "tp_ids": [
+          "TP-1",
+          "TP-2",
+          "TP-3"
+        ],
+        "fn_ids": [],
+        "fp_ids": []
+      }
+    ]
+  }
+]
