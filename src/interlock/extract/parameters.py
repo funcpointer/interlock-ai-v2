@@ -50,6 +50,11 @@ class ParameterRecord:
     # (Track 2) sets it to "llm" at downcast time. Adjudicator (Sprint 3)
     # uses this for per-flag provenance UX.
     provenance: Literal["regex", "llm"] = "regex"
+    # v2 Sprint 8 — extraction lane provenance for routing audit.
+    # 'regex' = Track 1 deterministic regex extraction.
+    # 'llm_text' = Track 2 LLM text extraction (Sprint 2).
+    # 'vision' = Sprint 8 vision extraction (diagram pages).
+    extraction_lane: Literal["regex", "llm_text", "vision"] = "regex"
 
 
 class _Pattern(NamedTuple):

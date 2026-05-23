@@ -89,4 +89,5 @@ def _claim_to_parameter_record(
         source_path=source_path,
         entity_tag=c.entity_tag,
         provenance="llm",
+        extraction_lane="llm_text",  # v2 Sprint 8
     )
