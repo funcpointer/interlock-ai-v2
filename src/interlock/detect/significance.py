@@ -33,6 +33,7 @@ from interlock.cache import cost_ledger
 from interlock.cache.disk import get_or_compute
 from interlock.detect.mismatch import Flag
 from interlock.llm.client import DEFAULT_MODEL, CachedBlock, call_structured
+from interlock.llm_pipeline.standards import clauses_for, to_citation
 
 PROMPT_VERSION = "v1"
 _CACHE_NAMESPACE = "llm-significance"
@@ -77,6 +78,15 @@ class SignificanceJudgment(BaseModel):
             "Self-reported confidence in this judgment, in [0,1]. Use lower "
             "values when the parameter family is ambiguous or the values "
             "could be interpreted multiple ways (design vs operating)."
+        ),
+    )
+    cited_clause_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Clause IDs from the supplied 'Applicable standards' list that "
+            "you cited in the engineering explanation. Must be exact matches "
+            "to provided clause_id values. Leave empty when no clauses were "
+            "supplied or none apply."
         ),
     )
 
@@ -148,6 +158,34 @@ def _build_user_block(flag: Flag) -> str:
     )
 
 
+def _build_standards_block(flag: Flag, project_id: str | None) -> tuple[str, list[str]]:
+    """Return (rendered_text, matched_clause_ids).
+
+    Empty string + [] when no matches OR no attribute_family on the flag.
+    """
+    family = (flag.attribute_family or "").strip()
+    if not family:
+        return "", []
+    matched = clauses_for(family, doc_class=None, project_id=project_id)
+    if not matched:
+        return "", []
+    lines = [
+        "",
+        "## Applicable standards",
+        "",
+        "When writing the rationale, cite clauses from this list when they "
+        "ground the engineering judgment. Reference by `source_name`. Do "
+        "NOT cite clauses that aren't on this list. Use the bracketed "
+        "`clause_id` in your `cited_clause_ids` response field.",
+        "",
+    ]
+    for c in matched:
+        lines.append(f"- [{c.clause_id}] {c.source_name}")
+        lines.append(f"  Summary: {c.summary.strip()}")
+        lines.append("")
+    return "\n".join(lines), [c.clause_id for c in matched]
+
+
 def _flag_id(flag: Flag) -> str:
     """Stable identifier for a flag — used as cache key material."""
     return (
@@ -157,18 +195,28 @@ def _flag_id(flag: Flag) -> str:
     )
 
 
-def judge(flag: Flag, *, model: str = DEFAULT_MODEL) -> SignificanceJudgment:
+def judge(
+    flag: Flag,
+    *,
+    model: str = DEFAULT_MODEL,
+    project_id: str | None = None,
+) -> SignificanceJudgment:
     """Get an LLM significance judgment for one flag.
 
-    Disk-cached on ``(flag_id, prompt_version, model)``. Anthropic prompt
-    cache (1h TTL) covers the system preamble + ontology so repeated calls
-    within the same hour pay ~10% of the system-prompt token cost.
+    Disk-cached on ``(flag_id, prompt_version, model, matched_clause_ids)``.
+    Anthropic prompt cache (1h TTL) covers the system preamble + ontology so
+    repeated calls within the same hour pay ~10% of the system-prompt token
+    cost. v2 Sprint 5a — `project_id` triggers project-specific clause
+    overrides; matched clause IDs are part of the cache key so registry
+    growth invalidates correctly.
     """
+    standards_text, matched_ids = _build_standards_block(flag, project_id)
 
     payload = {
         "flag_id": _flag_id(flag),
         "prompt_version": PROMPT_VERSION,
         "model": model,
+        "matched_clause_ids": matched_ids,
     }
 
     def _compute() -> SignificanceJudgment:
@@ -176,14 +224,16 @@ def judge(flag: Flag, *, model: str = DEFAULT_MODEL) -> SignificanceJudgment:
             CachedBlock(text=_SYSTEM_PREAMBLE, ttl="1h"),
             CachedBlock(text=_ONTOLOGY_BLOCK, ttl="1h"),
         ]
-        user_blocks = [CachedBlock(text=_build_user_block(flag), ttl=None)]
+        user_text = _build_user_block(flag)
+        if standards_text:
+            user_text = user_text + standards_text
+        user_blocks = [CachedBlock(text=user_text, ttl=None)]
         result, usage = call_structured(
             response_model=SignificanceJudgment,
             system_blocks=system_blocks,
             user_blocks=user_blocks,
             model=model,
         )
-        # Estimate which TTL was used for cache_creation (we wrote 1h blocks).
         cost_ledger.record(
             provider="anthropic",
             model=model,
@@ -194,7 +244,6 @@ def judge(flag: Flag, *, model: str = DEFAULT_MODEL) -> SignificanceJudgment:
             output_tokens=usage.get("output", 0),
             cache_ttl="1h",
         )
-        # Pydantic model is picklable since it's a top-level class.
         return result
 
     value, _hit = get_or_compute(_CACHE_NAMESPACE, payload, _compute)
@@ -222,6 +271,19 @@ def apply_judgment_to_flag(flag: Flag, judgment: SignificanceJudgment) -> Flag:
         if judgment.engineering_explanation
         else flag.rationale
     )
+    # v2 Sprint 5a — resolve cited_clause_ids → ClauseCitation tuple.
+    # Hallucinated IDs (not in registry) are silently dropped.
+    from interlock.llm_pipeline.schemas.clause import ClauseCitation
+    from interlock.llm_pipeline.standards import load_clauses
+
+    cited: tuple[ClauseCitation, ...] = ()
+    if judgment.cited_clause_ids:
+        by_id = {c.clause_id: c for c in load_clauses()}
+        cited = tuple(
+            to_citation(by_id[cid])
+            for cid in judgment.cited_clause_ids
+            if cid in by_id
+        )
     return Flag(
         parameter=flag.parameter,
         authoritative_doc_id=flag.authoritative_doc_id,
@@ -237,4 +299,5 @@ def apply_judgment_to_flag(flag: Flag, judgment: SignificanceJudgment) -> Flag:
         pairing_confidence=flag.pairing_confidence,
         provenance=flag.provenance,
         rerank_rationale=flag.rerank_rationale,
+        cited_clauses=cited,
     )

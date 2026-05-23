@@ -27,6 +27,7 @@ from interlock.detect.confidence import flag_confidence
 from interlock.detect.family import attribute_family_for_param_name
 from interlock.detect.tolerances import Severity, classify, relative_deviation
 from interlock.extract.parameters import ParameterRecord
+from interlock.llm_pipeline.schemas.clause import ClauseCitation
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,9 @@ class Flag:
     # v2 Sprint 4 — copied from AlignedPair.rerank_rationale by detect_flags.
     # None when the reranker didn't run or didn't approve this pair.
     rerank_rationale: str | None = None
+    # v2 Sprint 5a — clauses cited by the LLM judge. Empty tuple when
+    # the judge didn't run or the registry had no matches.
+    cited_clauses: tuple[ClauseCitation, ...] = ()
 
 
 def detect_flags(
