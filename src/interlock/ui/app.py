@@ -117,6 +117,16 @@ def _standards_chip(flag: Any) -> str:
     return f" · 📜 {short}"
 
 
+def _vision_chip(flag: Any) -> str:
+    """Sprint 8 — return reviewer-facing chip when at least one source
+    record came from the vision lane. Silent otherwise."""
+    a_lane = getattr(flag.a_record, "extraction_lane", "regex")
+    b_lane = getattr(flag.b_record, "extraction_lane", "regex")
+    if a_lane == "vision" or b_lane == "vision":
+        return " · 📷 Vision"
+    return ""
+
+
 def _entity_chip(flag: Any) -> str:
     """Return entity-tag chip text for the flag header.
 
@@ -289,6 +299,20 @@ with st.sidebar:
             "pair with reasoning. Replaces generic ⚠️ pairing warnings "
             "with explanations. Cold cost ~$0.005 per uncertain pair; "
             "cached."
+        ),
+    )
+
+    use_vision_lane = st.toggle(
+        "Vision extraction for diagram pages",
+        value=True,
+        help=(
+            "Routes diagram pages (one-lines, schematics, P&IDs, TCC plots) "
+            "to Claude Sonnet 4.5 Vision, which returns structured equipment "
+            "+ parameter + value tuples directly. Fixes the false-positive "
+            "class where text-layer-y binding mis-attributes fuse labels "
+            "across coordination-study diagrams.\n\n"
+            "Cold cost ~$0.02 per diagram page; cached. Toggle off to "
+            "disable vision routing entirely."
         ),
     )
 
@@ -533,12 +557,15 @@ if run:
         "llm_extract_a": "AI parameter extraction — Doc A",
         "llm_extract_b": "AI parameter extraction — Doc B",
         "entity_detect": "Detecting equipment IDs (AI)",
+        "vision_extract": "AI vision extraction on diagram pages",
         "align": "Matching parameters across documents",
         "rerank": "Reviewing ambiguous pairs with AI",
         "detect": "Detecting mismatches",
         "judge": "AI severity + standards citations",
     }
     _STAGE_ORDER: list[str] = ["ingest_a", "ingest_b", "extract"]
+    if use_vision_lane:
+        _STAGE_ORDER.append("vision_extract")
     if use_entity_grounding:
         _STAGE_ORDER.append("entity_detect")
     _STAGE_ORDER.append("align")
@@ -613,6 +640,7 @@ if run:
                 use_llm_reranker=use_llm_reranker,
                 use_entity_grounding=use_entity_grounding,
                 project_id=project_id,
+                use_vision_lane=use_vision_lane,
             )
             flags = review_result.flags
             status.update(
@@ -861,10 +889,13 @@ if flags:
         ent_chip = _entity_chip(f)
         # v2 Sprint 5a: cited standards chip; silent when no citations
         std_chip = _standards_chip(f)
+        # v2 Sprint 8: vision-lane chip; silent when neither record came
+        # from the vision lane
+        vis_chip = _vision_chip(f)
         header = (
             f"{_SEVERITY[sev]['emoji']} **{f.parameter}** · "
             f"{dev_str} · confidence {f.confidence:.2f}"
-            f"{pair_badge}{prov_badge}{ent_chip}{std_chip}{verdict_badge}"
+            f"{pair_badge}{prov_badge}{ent_chip}{std_chip}{vis_chip}{verdict_badge}"
         )
 
         with st.expander(
@@ -1042,6 +1073,8 @@ if flags:
                         "coupled_effects": coupled_families_for(  # v2 Sprint 5b
                             getattr(f, "attribute_family", None)
                         ),
+                        "extraction_lane_a": getattr(f.a_record, "extraction_lane", "regex"),  # v2 Sprint 8
+                        "extraction_lane_b": getattr(f.b_record, "extraction_lane", "regex"),  # v2 Sprint 8
                     }
                     st.rerun()
             with b_dismiss:
