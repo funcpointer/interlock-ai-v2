@@ -50,7 +50,11 @@ def test_classify_docs_false_returns_none(mocker) -> None:  # type: ignore[no-un
         return_value=_fake_classify_response("coordination_study"),
     )
     result = review_two_documents_full(
-        DOC_A, DOC_B, embed_fn=_trivial_embedder, classify_docs=False,
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     assert spy.call_count == 0
     assert result.doc_class_a is None
@@ -68,7 +72,11 @@ def test_classify_docs_true_populates_doc_class_fields(mocker) -> None:  # type:
         return_value=_fake_classify_response("coordination_study"),
     )
     result = review_two_documents_full(
-        DOC_A, DOC_B, embed_fn=_trivial_embedder, classify_docs=True,
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=True,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     assert result.doc_class_a is not None
     assert result.doc_class_b is not None
@@ -87,7 +95,11 @@ def test_classify_docs_failure_returns_unknown_does_not_raise(mocker) -> None:  
         side_effect=RuntimeError("API outage simulated"),
     )
     result = review_two_documents_full(
-        DOC_A, DOC_B, embed_fn=_trivial_embedder, classify_docs=True,
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=True,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     assert isinstance(result.flags, list)  # pipeline still ran
     assert result.doc_class_a is not None
@@ -103,6 +115,9 @@ def test_classify_docs_false_is_bit_identical_to_v1() -> None:
     result = review_two_documents_full(
         DOC_A, DOC_B, embed_fn=_trivial_embedder,
         classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     expected_params = {"%Z", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
@@ -130,7 +145,10 @@ def test_use_llm_extraction_false_does_not_call_extractor(mocker) -> None:  # ty
     )
     result = review_two_documents_full(
         DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
         use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     assert spy.call_count == 0
     for f in result.flags:
@@ -154,6 +172,8 @@ def test_use_llm_extraction_true_runs_extractor_pipeline_still_ships_flags(mocke
         embed_fn=_trivial_embedder,
         classify_docs=False,
         use_llm_extraction=True,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     assert isinstance(result.flags, list)
     # Extractor was called (per-page across both docs).
@@ -169,7 +189,10 @@ def test_snapshot_equivalence_use_llm_extraction_false() -> None:
     result = review_two_documents_full(
         DOC_A, DOC_B,
         embed_fn=_trivial_embedder,
+        classify_docs=False,
         use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     expected_params = {"%Z", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
@@ -191,6 +214,8 @@ def test_v1_snapshot_equivalence_all_flags_are_rule_only() -> None:
         embed_fn=_trivial_embedder,
         classify_docs=False,
         use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     assert result.flags, "expected non-zero baseline flags from Option 1 fixture"
     for f in result.flags:
@@ -216,6 +241,8 @@ def test_pipeline_annotates_provenance_when_llm_extraction_on(mocker) -> None:  
         embed_fn=_trivial_embedder,
         classify_docs=False,
         use_llm_extraction=True,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     for f in result.flags:
         # The field must be one of the four enumerated values, never None.
@@ -232,6 +259,8 @@ def test_adjudicator_runs_unconditionally() -> None:
         embed_fn=_trivial_embedder,
         classify_docs=False,
         use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     for f in result.flags:
         assert f.provenance != "unknown", (
@@ -267,7 +296,10 @@ def test_use_llm_reranker_false_is_bit_identical_to_v2_2(mocker) -> None:  # typ
     spy = mocker.patch("interlock.llm_pipeline.pair._call_claude_pair")
     result = review_two_documents_full(
         DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
         use_llm_reranker=False,
+        use_entity_grounding=False,
     )
     assert spy.call_count == 0
     expected_params = {"%Z", "Fault Current", "Transformer Rating"}
@@ -287,7 +319,10 @@ def test_use_llm_reranker_true_unanimous_approve_preserves_flags(mocker) -> None
     )
     result = review_two_documents_full(
         DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
         use_llm_reranker=True,
+        use_entity_grounding=False,
     )
     expected_params = {"%Z", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
@@ -303,7 +338,10 @@ def test_pipeline_survives_reranker_exception(mocker) -> None:  # type: ignore[n
     )
     result = review_two_documents_full(
         DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
         use_llm_reranker=True,
+        use_entity_grounding=False,
     )
     assert isinstance(result.flags, list)
 
@@ -329,3 +367,107 @@ def test_sprint3_provenance_and_sprint4_rationale_coexist() -> None:
     )
     assert f.provenance == "rule_only"
     assert f.rerank_rationale == "confirmed pair"
+
+
+# --- Sprint 4.5: entity grounding pipeline integration ------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_entity_cache() -> None:
+    disk_cache.clear_namespace("llm-entities")
+    yield
+    disk_cache.clear_namespace("llm-entities")
+
+
+def _fake_entity_response(label: str, page: int = 1) -> MagicMock:
+    content = MagicMock()
+    content.text = (
+        '{"page":' + str(page) + ',"entities":['
+        '{"label":"' + label + '","kind":"equipment","y_top":0,"y_bottom":10000,"page":' + str(page) + '}'
+        ']}'
+    )
+    return MagicMock(content=[content])
+
+
+def test_use_entity_grounding_false_preserves_v22_snapshot(mocker) -> None:  # type: ignore[no-untyped-def]
+    """All v2 toggles explicit False → v1.5 / v2.2 parameter set."""
+    from interlock.pipeline import review_two_documents_full
+    spy = mocker.patch("interlock.llm_pipeline.entity_detect._call_claude_entity")
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+    )
+    assert spy.call_count == 0
+    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
+    assert expected_params.issubset(surfaced)
+
+
+def test_use_entity_grounding_true_binds_tags_to_records(mocker) -> None:  # type: ignore[no-untyped-def]
+    """With detector mocked to return one entity covering the whole page,
+    every flagged record should have entity_tag populated."""
+    from interlock.pipeline import review_two_documents_full
+    mocker.patch(
+        "interlock.llm_pipeline.entity_detect._call_claude_entity",
+        return_value=_fake_entity_response("ALL_PAGE", page=1),
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=True,
+    )
+    assert result.flags, "expected non-zero flags after entity grounding"
+    tagged_count = sum(
+        1 for f in result.flags
+        if f.a_record.entity_tag or f.b_record.entity_tag
+    )
+    assert tagged_count > 0
+
+
+def test_cross_entity_pair_refuses_to_form() -> None:
+    """If A's record is tagged XFMR-001 and B's same-page same-name record
+    is tagged XFMR-002, Phase 19 alignment refuses to pair them."""
+    from interlock.align.exact import align_exact
+    from interlock.extract.parameters import ParameterRecord
+
+    a = ParameterRecord(
+        doc_id="a", page=1, bbox=(0, 100, 100, 110), section=None,
+        span_text="Z=5.75%", name="%Z", raw_value="5.75 %",
+        normalized_magnitude=0.0575, normalized_unit="dimensionless",
+        entity_tag="XFMR-001",
+    )
+    b = ParameterRecord(
+        doc_id="b", page=1, bbox=(0, 100, 100, 110), section=None,
+        span_text="Z=5.20%", name="%Z", raw_value="5.20 %",
+        normalized_magnitude=0.052, normalized_unit="dimensionless",
+        entity_tag="XFMR-002",
+    )
+    pairs = align_exact([a], [b])
+    assert pairs == [], (
+        "Phase 19 same-entity rule should refuse to pair across different entities"
+    )
+
+
+def test_detector_exception_falls_back_gracefully(mocker) -> None:  # type: ignore[no-untyped-def]
+    """API outage mid-detect → pipeline still ships flags (no entity tags)."""
+    from interlock.pipeline import review_two_documents_full
+    mocker.patch(
+        "interlock.llm_pipeline.entity_detect._call_claude_entity",
+        side_effect=RuntimeError("API down"),
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=True,
+    )
+    assert isinstance(result.flags, list)
+    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
+    assert expected_params.issubset(surfaced)

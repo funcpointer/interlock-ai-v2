@@ -86,6 +86,10 @@ def test_pipeline_stage_cb_fires_in_order() -> None:
         DOC_B,
         embed_fn=_trivial_embedder,
         use_llm_judge=False,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
         stage_cb=lambda sid, state: calls.append((sid, state)),
     )
     starts = [sid for (sid, state) in calls if state == "start"]

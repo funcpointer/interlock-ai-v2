@@ -42,6 +42,11 @@ def test_option1_gold_passes_under_cross_doc_default() -> None:
         DOC_B,
         embed_fn=_stub_embed,
         same_page_only=False,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
     )
     surfaced = _surface_strings(flags)
     surfaced_concat = " ".join(surfaced)
@@ -76,6 +81,11 @@ def test_option1_gold_recall_under_cross_doc_default() -> None:
         DOC_B,
         embed_fn=_stub_embed,
         same_page_only=False,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
     )
     high = [f for f in flags if f.confidence >= THRESHOLD]
     # Group surfaced flags by parameter family — each TP family should appear

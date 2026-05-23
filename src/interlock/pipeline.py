@@ -64,7 +64,7 @@ def review_two_documents_full(
     doc_a_id: str = "doc_a",
     doc_b_id: str = "doc_b",
     same_page_only: bool = True,
-    use_llm_judge: bool = False,
+    use_llm_judge: bool = True,            # v2.4: flipped to True
     suppress_info: bool = True,
     use_claim_layer: bool = False,
     same_entity_only: bool = True,
@@ -73,9 +73,10 @@ def review_two_documents_full(
     enable_vision_ocr: bool = False,
     ocr_progress_cb: OcrProgressCallback | None = None,
     stage_cb: StageCallback | None = None,
-    classify_docs: bool = False,
-    use_llm_extraction: bool = False,
-    use_llm_reranker: bool = False,
+    classify_docs: bool = True,            # v2.4: flipped to True
+    use_llm_extraction: bool = True,       # v2.4: flipped to True
+    use_llm_reranker: bool = True,         # v2.4: flipped to True
+    use_entity_grounding: bool = True,     # v2.4: new, default True
 ) -> ReviewResult:
     """Run end-to-end review.
 
@@ -179,6 +180,21 @@ def review_two_documents_full(
         pb = pb + llm_records_b
         _stage("llm_extract_b", "done")
 
+    # v2 Sprint 4.5: entity grounding. Runs AFTER Track 2 union-merge so
+    # both Track 1 + Track 2 records get bound by the same detector pass.
+    if use_entity_grounding:
+        from interlock.extract.entity_bind import bind_records_to_entities
+        from interlock.llm_pipeline.entity_detect import detect_entities_for_doc
+        _stage("entity_detect", "start")
+        try:
+            ents_a = detect_entities_for_doc(pdf_a)
+            ents_b = detect_entities_for_doc(pdf_b)
+            pa = bind_records_to_entities(pa, ents_a)
+            pb = bind_records_to_entities(pb, ents_b)
+        except Exception:
+            pass  # graceful fallback — leave entity_tags as-is
+        _stage("entity_detect", "done")
+
     _stage("align", "start")
     if use_claim_layer:
         ca = claims_from_records(pa)
@@ -264,7 +280,7 @@ def review_two_documents(
     doc_a_id: str = "doc_a",
     doc_b_id: str = "doc_b",
     same_page_only: bool = True,
-    use_llm_judge: bool = False,
+    use_llm_judge: bool = True,            # v2.4: flipped to True
     suppress_info: bool = True,
     use_claim_layer: bool = False,
     same_entity_only: bool = True,
@@ -273,9 +289,10 @@ def review_two_documents(
     enable_vision_ocr: bool = False,
     ocr_progress_cb: OcrProgressCallback | None = None,
     stage_cb: StageCallback | None = None,
-    classify_docs: bool = False,
-    use_llm_extraction: bool = False,
-    use_llm_reranker: bool = False,
+    classify_docs: bool = True,            # v2.4: flipped to True
+    use_llm_extraction: bool = True,       # v2.4: flipped to True
+    use_llm_reranker: bool = True,         # v2.4: flipped to True
+    use_entity_grounding: bool = True,     # v2.4: new, default True
 ) -> list[Flag]:
     """Back-compat shim: returns only the flag list.
 
@@ -301,4 +318,5 @@ def review_two_documents(
         classify_docs=classify_docs,
         use_llm_extraction=use_llm_extraction,
         use_llm_reranker=use_llm_reranker,
+        use_entity_grounding=use_entity_grounding,
     ).flags

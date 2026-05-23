@@ -234,4 +234,7 @@ def apply_judgment_to_flag(flag: Flag, judgment: SignificanceJudgment) -> Flag:
         severity=judgment.severity,
         deviation_pct=flag.deviation_pct,
         attribute_family=flag.attribute_family,
+        pairing_confidence=flag.pairing_confidence,
+        provenance=flag.provenance,
+        rerank_rationale=flag.rerank_rationale,
     )

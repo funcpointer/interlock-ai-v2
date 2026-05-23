@@ -38,6 +38,11 @@ def test_cross_doc_gold_set_thresholds() -> None:
         doc_a_id=pair["doc_a_id"],
         doc_b_id=pair["doc_b_id"],
         same_page_only=False,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
     )
     above = [f for f in flags if f.confidence >= threshold]
 
