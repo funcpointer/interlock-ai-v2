@@ -257,6 +257,30 @@ Sprint 5a ships a curated YAML clause registry, not an embedding-based RAG. When
 3. Backlog — Verbatim standards corpus + true embedding-based RAG (legal review per source).
 4. Backlog — UI: filter visible flags by cited clause.
 
+## Known limits — Sprint 5b coupled-effect graph (v2)
+
+Static parameter-family dependency map + Phase-14 SQLite store query for matching persisted claims. Always-on; pure-Python + SQLite; no API calls.
+
+**Architecture that generalises:**
+- `COUPLED_FAMILIES` static dict mapping primary family → dependent families
+- `coupled_families_for(family)` returns fresh copy of dependents (no caller mutation risk)
+- `coupled_claims_for(family)` walks the dependent families via `claims_for_attribute()` in the Phase-14 store
+- Failure modes (store unreachable, missing family) collapse to `[]`
+- UI surfaces "🕸️ Coupled effects" markdown block per flag; silent when family unknown
+
+**Heuristics + scope deliberately limited in Sprint 5b:**
+- First-order traversal only. No transitive BFS in the UI; reviewer can click through dependent claims manually if persisted.
+- Static map is hand-curated. Same curation discipline as Sprint 5a's clause registry — grow it as new parameter families surface.
+- SQLite store query is empty by default (`persist_claims=False`). UI shows the family name without per-claim records until reviewer enables persistence.
+- The judge's per-flag `downstream_effects` list (free-text) is NOT yet merged with the static map — Sprint 5b ships static-only. Combining the two is a Sprint 6 polish.
+- No graph visualization. Markdown-only surface.
+
+**Generalisation plan** (post-Sprint 5b):
+1. Sprint 6 — Per-class eval + calibration: gold sets per doc-class; CI gates on precision/recall; confidence calibration.
+2. Backlog — Merge judge's `downstream_effects` with static map for richer per-flag dependent lists.
+3. Backlog — Multi-hop traversal: walk impedance → fault → relay → coordination.
+4. Backlog — Graph visualization (force-directed) in the expander.
+
 ## Open questions + future work
 
 - **Entity fingerprinting** (BACKLOG R-F): binding an implicit equipment in one doc to a tagged equipment on the other via attribute fingerprint. Required for cross-doc multi-equipment demos.

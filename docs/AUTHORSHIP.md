@@ -122,6 +122,20 @@ Shipped via 7 phase tags (`phase-24.1-classifier-schemas` → `phase-24.7-classi
 
 **Honest scope statement.** See `docs/TDD.md` § "Known limits — Sprint 1 doc-class classifier (v2)" for what generalises vs what's overfit, and which 5 of 8 classes still inherit v1 behaviour end-to-end. The 11-doc partial corpus is acknowledged as smaller than the 20-doc spec target — the remaining 9 real PDFs are a sourcing exercise, not a code blocker.
 
+## Sprint 5b (v2) — Coupled-effect graph traversal
+
+Shipped via 2 phase tags (`phase-30.1-coupled-map`, `phase-30.3-coupled-ui`) on top of `v2.5-rag`. Exit tag: `v2.6-graph`.
+
+**Components landed:**
+- `src/interlock/detect/coupled.py` — `COUPLED_FAMILIES` static map (10 primary families × their dependent families) + `coupled_families_for()` lookup + `coupled_claims_for()` Phase-14 SQLite store query. Same engineering knowledge as the LLM judge's `_ONTOLOGY_BLOCK`, surfaced deterministically + auditably for the reviewer.
+- `src/interlock/ui/app.py` — "🕸️ Coupled effects — also verify:" section in each flag expander listing dependent families. When `persist_claims=True` and the SQLite store has matching claims, also surfaces entity+value+page entries (top 3 per family). JSON export gains `coupled_effects` list per accepted flag.
+
+**Test surface delta:** +10 tests (6 family-map unit + 4 store-query unit). No live-API test (no LLM call). Total v2 test count at `v2.6-graph`: **448 passing** + live-API slow-marked suites.
+
+**Cost delta:** **$0**. Static map + SQLite query only; no API calls.
+
+**Honest scope statement.** The static map encodes the canonical first-order dependency graph. Multi-hop traversal (e.g. "impedance change → fault current → relay pickup → coordination") is single-hop in the UI today (just the direct dependents of the flag's family). Walking deeper requires either reviewer-driven navigation (click into a dependent claim) or graph BFS — deferred to a follow-up. SQLite store query returns empty when `persist_claims=False` (default), so the surface gracefully shows family names without per-claim records until the user opts in.
+
 ## Sprint 5a (v2) — Standards-as-RAG (curated YAML clause registry)
 
 Shipped via 5 phase tags (`phase-29.1-clause-schemas` → `phase-29.5-rag-ui`) plus a sixth phase-29.6 live-exit-gate commit on top of `v2.4-grounding`. Exit tag: `v2.5-rag`.
