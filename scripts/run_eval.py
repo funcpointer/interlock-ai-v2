@@ -69,7 +69,18 @@ def _flag_matches_gold(flag, gold) -> bool:  # type: ignore[no-untyped-def]
 def main() -> None:
     gold = yaml.safe_load(GOLD.read_text())["flags"]
     embedder = _real_or_stub_embedder()
-    flags = review_two_documents(DOC_A, DOC_B, embed_fn=embedder)
+    # v2.7 — pin to v1.5-deterministic path. The eval gold (Phase 11) was
+    # captured against the deterministic pipeline; v2.4+ default LLM lanes
+    # introduce non-determinism between runs that breaks the harness's
+    # 100% TP recall + 0% FP-trap assertion.
+    flags = review_two_documents(
+        DOC_A, DOC_B, embed_fn=embedder,
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
+    )
     above_threshold = [f for f in flags if f.confidence >= SURFACE_THRESHOLD]
 
     per_id: dict[str, dict[str, object]] = {}

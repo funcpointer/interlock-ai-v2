@@ -47,14 +47,31 @@ def test_pipeline_emits_directional_flags() -> None:
 
 def test_review_two_documents_full_returns_review_result() -> None:
     """The _full variant returns ReviewResult; the legacy shim still
-    returns just the flag list."""
-    result = review_two_documents_full(DOC_A, DOC_B, embed_fn=_trivial_embedder)
+    returns just the flag list.
+
+    Locked to v1.5-deterministic path (all Track 2 toggles explicit False)
+    so the same-result assertion across two pipeline calls is reproducible.
+    Without explicit kwargs, v2.4 defaults activate LIVE LLM lanes that
+    introduce non-determinism between calls 1 and 2.
+    """
+    v15_kwargs = dict(
+        classify_docs=False,
+        use_llm_extraction=False,
+        use_llm_reranker=False,
+        use_entity_grounding=False,
+        use_llm_judge=False,
+    )
+    result = review_two_documents_full(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder, **v15_kwargs,
+    )
     assert isinstance(result, ReviewResult)
     assert isinstance(result.flags, list)
     assert isinstance(result.unpaired_a, list)
     assert isinstance(result.unpaired_b, list)
     # Legacy shim must return the same flag list.
-    legacy_flags = review_two_documents(DOC_A, DOC_B, embed_fn=_trivial_embedder)
+    legacy_flags = review_two_documents(
+        DOC_A, DOC_B, embed_fn=_trivial_embedder, **v15_kwargs,
+    )
     assert {(f.parameter, f.a_record.raw_value, f.b_record.raw_value) for f in legacy_flags} == {
         (f.parameter, f.a_record.raw_value, f.b_record.raw_value) for f in result.flags
     }
