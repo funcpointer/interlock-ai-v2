@@ -1,0 +1,123 @@
+# Sprint 5a — curated standards-clause registry.
+# Each entry is a paraphrase of the cited standard's substance. Not the
+# verbatim text of the standard — we cite source_name + edition_year so a
+# reviewer can cross-check against the original.
+
+clauses:
+  - clause_id: IEEE-C57.12.00-2015-5.4
+    edition_year: 2015
+    source_name: "IEEE C57.12.00-2015 §5.4 (Impedance Tolerance)"
+    applicable_families: [impedance_pct]
+    applicable_doc_classes: [equipment_spec, coordination_study]
+    tolerance_band: 0.075
+    summary: |
+      Per IEEE C57.12.00-2015 §5.4, the impedance voltage of a two-winding
+      transformer shall not differ from the specified value by more than ±7.5%.
+      Deviations above this threshold materially affect downstream short-circuit
+      duty and protection coordination.
+
+  - clause_id: IEC-60076-1-2011-5.3
+    edition_year: 2011
+    source_name: "IEC 60076-1:2011 §5.3 (Voltage Ratio Tolerance)"
+    applicable_families: [voltage_v, voltage_kv]
+    applicable_doc_classes: []
+    tolerance_band: 0.005
+    summary: |
+      Per IEC 60076-1:2011 §5.3, the voltage ratio of a power transformer at
+      no-load and rated tap shall be within ±0.5% of the specified ratio.
+      Tighter than IEEE on ratio; deviations indicate either tap-change
+      design or a transcription error.
+
+  - clause_id: IEEE-242-2001-15.5
+    edition_year: 2001
+    source_name: "IEEE Std 242-2001 §15.5 (Available Fault Current)"
+    applicable_families: [fault_current_a, fault_current_ka]
+    applicable_doc_classes: []
+    summary: |
+      Per IEEE Std 242-2001 (Buff Book) §15.5, the available fault current
+      at each bus must be computed consistently across all study documents.
+      A discrepancy indicates either an upstream impedance change or a
+      calculation error in one of the downstream studies; typical industry
+      tolerance is ±20%.
+
+  - clause_id: IEEE-C57.12.00-2015-5.10
+    edition_year: 2015
+    source_name: "IEEE C57.12.00-2015 §5.10 (Rated kVA Tolerance)"
+    applicable_families: [transformer_rating_va]
+    applicable_doc_classes: [equipment_spec, coordination_study]
+    tolerance_band: 0.05
+    summary: |
+      Per IEEE C57.12.00-2015 §5.10, transformer rated kVA carries a ±5%
+      typical tolerance (extended to ±10% with loading classification per
+      §5.11). Rating mismatches across documents directly affect cable
+      ampacity, breaker interrupting capacity, and CT ratio sizing.
+
+  - clause_id: NEMA-MG-1-2016-12.43
+    edition_year: 2016
+    source_name: "NEMA MG-1-2016 §12.43 (Motor Full-Load Current)"
+    applicable_families: [motor_fla_a]
+    applicable_doc_classes: []
+    tolerance_band: 0.10
+    summary: |
+      Per NEMA MG-1-2016 §12.43, motor full-load current at nameplate voltage
+      and full-load slip carries ±10% manufacturing tolerance. Differences
+      above this threshold across project documents suggest either a vendor
+      change, a motor mis-specification, or confusion between FLA and
+      starting/inrush current.
+
+  - clause_id: IEEE-242-2001-15.10
+    edition_year: 2001
+    source_name: "IEEE Std 242-2001 §15.10 (Relay Pickup Settings)"
+    applicable_families: [relay_pickup_a]
+    applicable_doc_classes: [relay_setting_sheet, coordination_study]
+    summary: |
+      Per IEEE Std 242-2001 §15.10, relay pickup settings are derived from
+      transformer impedance, fault current, and load profile — any of which
+      changing requires the relay settings to be re-verified. Pickup
+      discrepancies across coordination studies usually trace back to an
+      upstream parameter revision.
+
+  - clause_id: IEEE-242-2001-16.2
+    edition_year: 2001
+    source_name: "IEEE Std 242-2001 §16.2 (Fuse Selectivity)"
+    applicable_families: [fuse_amps]
+    applicable_doc_classes: [coordination_study]
+    summary: |
+      Per IEEE Std 242-2001 §16.2, the speed ratio between upstream and
+      downstream fuses must be sufficient to achieve selective coordination.
+      A change in fuse rating without verifying the upstream/downstream
+      ratio risks losing selectivity and tripping out more equipment than
+      necessary on a downstream fault.
+
+  - clause_id: IEEE-C37.04-2018-5.2
+    edition_year: 2018
+    source_name: "IEEE C37.04-2018 §5.2 (Breaker Interrupting Rating)"
+    applicable_families: [breaker_interrupting_ka, fault_current_ka]
+    applicable_doc_classes: [equipment_spec, coordination_study]
+    summary: |
+      Per IEEE C37.04-2018 §5.2, circuit-breaker interrupting capacity
+      must exceed the maximum available fault current at the installation
+      point. A change to the fault current value across documents must
+      trigger re-verification of every downstream breaker's rating margin.
+
+  - clause_id: IEEE-1584-2018-6.1
+    edition_year: 2018
+    source_name: "IEEE 1584-2018 §6.1 (Arc-Flash Incident Energy)"
+    applicable_families: [arc_flash_cal_cm2, fault_current_ka]
+    applicable_doc_classes: [coordination_study]
+    summary: |
+      Per IEEE 1584-2018 §6.1, arc-flash incident energy is a function of
+      bolted fault current, breaker clearing time, and working distance.
+      A change to any input requires re-running the arc-flash study and
+      re-issuing PPE / labelling per NFPA 70E.
+
+  - clause_id: IEC-60076-7-2018-7.3
+    edition_year: 2018
+    source_name: "IEC 60076-7:2018 §7.3 (Loading Above Nameplate)"
+    applicable_families: [transformer_rating_va, transformer_loading_pct]
+    applicable_doc_classes: []
+    summary: |
+      Per IEC 60076-7:2018 §7.3, loading a transformer above its nameplate
+      rating accelerates insulation ageing per the Arrhenius law. Sustained
+      operation above the rating without explicit derating analysis voids
+      the manufacturer's life expectancy.
