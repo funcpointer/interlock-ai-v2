@@ -122,6 +122,30 @@ Shipped via 7 phase tags (`phase-24.1-classifier-schemas` → `phase-24.7-classi
 
 **Honest scope statement.** See `docs/TDD.md` § "Known limits — Sprint 1 doc-class classifier (v2)" for what generalises vs what's overfit, and which 5 of 8 classes still inherit v1 behaviour end-to-end. The 11-doc partial corpus is acknowledged as smaller than the 20-doc spec target — the remaining 9 real PDFs are a sourcing exercise, not a code blocker.
 
+## Sprint 8 (v2) — Vision lane for diagram pages (+ Sprint 7-lite structure classifier)
+
+Shipped via 4 phase tags (`phase-32.1-vision-schemas` → `phase-32.4-vision-ui`) on top of `v2.7-eval`. Exit tag: `v2.8-vision-lane`.
+
+**Architecture decision.** Sprint 7's audit chain piece deferred to Sprint 9.5; Sprint 7's structure classifier piece bundled into Sprint 8 because it's a routing dependency. The hotfix shipped first (drop nearest-y fallback) prevents the LPS-RK demo bug at the binding layer; Sprint 8's vision lane is the proper architectural fix.
+
+**Components landed:**
+- `src/interlock/llm_pipeline/schemas/page_structure.py` — `PageStructure` Literal (prose / table / diagram / mixed).
+- `src/interlock/llm_pipeline/schemas/vision_claim.py` — `VisionClaim` + `VisionPageResult` pydantic v2 frozen models.
+- `src/interlock/llm_pipeline/page_classify.py` — `classify_page_structure(pdf_path, page) → PageStructure` heuristic + diskcache namespace `page-structure` keyed on (PDF path + size + mtime + page). Returns `mixed` on any failure. Diagram signal fires before sparse-text floor so callout pages route to vision.
+- `src/interlock/llm_pipeline/vision_extract.py` — `vision_extract_page()` Sonnet 4.5 Vision call. Renders page at 300 dpi PNG; structured-output prompt; hallucination guard (entity_id substring-checked against page text); diskcache namespace `llm-vision`. Failure modes (API outage, parse error, validation error, hallucination rejection) all collapse to `[]` per page.
+- `src/interlock/llm_pipeline/prompts/vision_extract.md` — system prompt locked from proto 1's confirmed-good shape (`page_understanding` + `page_layout` + `claims[entity_kind, entity_id, entity_location_hint, parameter_name, raw_value, visual_evidence]`).
+- `src/interlock/extract/parameters.py` — `ParameterRecord` gains `extraction_lane: Literal["regex", "llm_text", "vision"] = "regex"`.
+- `src/interlock/llm_pipeline/schemas/claim.py` — Track 2 LLM-text extractor now sets `extraction_lane="llm_text"` (distinguished from regex).
+- `src/interlock/pipeline.py` — `use_vision_lane: bool = True` kwarg (default ON); per-page routing logic between `extract` and `align`. Diagram pages → vision lane; prose / table / mixed → current paths.
+- `src/interlock/ui/app.py` — sidebar toggle (default ON); `📷 Vision` chip in flag header (silent unless ≥1 source record from vision); `vision_extract` stage label + stage-order entry; JSON export gains `extraction_lane_a` / `extraction_lane_b` keys.
+- `tests/conftest.py` — global autouse fixture stubs `vision_extract_page → []` for tests not marked `@pytest.mark.vision_lane`. Keeps pre-Sprint-8 tests fast + offline while the new lane defaults ON.
+
+**Test surface delta:** +27 tests (1 page_structure + 6 vision_claim + 6 page_classify + 9 vision_extract + 5 e2e pipeline). Live exit-gate tests (3, slow + needs_anthropic): LPS-RK-400SP vision extraction; LPS-RK false-positive suppression on Option 1; P&ID generalization.
+
+**Cost delta:** ~$0.02 per diagram page Sonnet 4.5 Vision; ~$0.14 per cold review on Option 1 fixture (7 diagram pages). Cached after first run.
+
+**Honest scope statement.** Sprint 8 fixes the diagram-binding class of false positives by replacing y-binding with vision-extracted (entity, value) tuples. Prose + table pages stay on the v2.7 paths (unchanged). Audit chain instrumentation (originally planned for Sprint 7) deferred to Sprint 9.5; Sprint 9 (cross-doc resolution, P0) ships next. Live exit-gate tests slow-marked and run on demand.
+
 ## Sprint 6 (v2) — Per-class eval + confidence calibration
 
 Shipped via 2 phase tags (`phase-31.1-per-class-gold`, `phase-31.3-calibration`) plus a final `v2.7-eval` exit on top of `v2.6-graph`.

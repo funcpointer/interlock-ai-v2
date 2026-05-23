@@ -305,6 +305,32 @@ Sprint 6 ships the per-class flag eval harness + confidence calibration infra. S
 3. Weekly calibration runs producing diff vs prior week.
 4. Backlog — incident-DB benchmarks (NERC, IEEE PES); embedding-based RAG over verbatim standards corpus.
 
+## Known limits — Sprint 8 vision lane (v2)
+
+The vision lane ships behind `use_vision_lane=True` (default ON). When OFF: pipeline is bit-identical to v2.7. When ON: each page passes through the page-structure classifier; diagram pages route to Sonnet 4.5 Vision, which returns structured (entity, parameter, value) tuples directly — no post-hoc binding step.
+
+**Architecture that generalises:**
+- Per-page routing by structure classifier (no doc-class assumption needed)
+- Vision-returned `entity_id` becomes the record's `entity_tag` directly (no y-binding)
+- Span-identity hallucination guard: `entity_id` must appear in the page's PyMuPDF text or the claim is dropped
+- `extraction_lane: Literal["regex", "llm_text", "vision"]` provides audit signal for Sprint 9.5 audit chain
+- Diskcache namespaces `page-structure` + `llm-vision` survive across pipeline runs
+- Failure modes (API outage, parse error, validation error, hallucination) all collapse to `[]` per page; rest of pipeline runs
+- Global `tests/conftest.py` autouse stub keeps pre-Sprint-8 tests offline; `@pytest.mark.vision_lane` opts a test back into the real path
+
+**Heuristics + scope deliberately limited in Sprint 8:**
+- Page-structure classifier is heuristic-only (line-length stats + image area ratio). LLM-based structure classifier deferred — heuristic is fast + free + good enough on the seed corpus.
+- Vision lane only fires on `diagram` pages. `mixed` pages route to current path even if vision might do better. Conservative routing prevents wasted cost on text-heavy pages.
+- Hallucination guard requires `entity_id` to appear in the page text. On scanned pages (no text layer), guard would drop everything — Phase 20 vision-OCR provides text in that case; OCR-modality lane (Sprint 10) extends the guard to OCR'd text.
+- Vision-extracted records carry `bbox=(0,0,0,0)` (no per-token coordinates from Sonnet Vision in this lane — only entity-level location_hint). Citation renderer's whole-page-snippet fallback (Sprint 2 fix) handles this same as LLM-text records.
+- No cost ceiling protection — a 100-page coordination study runs ~$2 on cold pipelines. Documented in sidebar help; reviewers see the cost note before toggling on.
+
+**Generalisation plan** (post-Sprint 8):
+1. Sprint 9 — cross-doc entity resolution + per-project entity aliases (P0).
+2. Sprint 9.5 — audit chain (deferred from Sprint 7).
+3. Sprint 10 — OCR-modality lane (per-token bboxes from vision for scanned pages, P1).
+4. Sprint 11 — CI matrix gates per §10 anti-overfitting matrix.
+
 ## Open questions + future work
 
 - **Entity fingerprinting** (BACKLOG R-F): binding an implicit equipment in one doc to a tagged equipment on the other via attribute fingerprint. Required for cross-doc multi-equipment demos.
