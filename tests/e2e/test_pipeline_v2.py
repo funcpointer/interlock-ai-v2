@@ -430,9 +430,13 @@ def test_use_entity_grounding_true_binds_tags_to_records(mocker) -> None:  # typ
     assert tagged_count > 0
 
 
-def test_cross_entity_pair_refuses_to_form() -> None:
-    """If A's record is tagged XFMR-001 and B's same-page same-name record
-    is tagged XFMR-002, Phase 19 alignment refuses to pair them."""
+def test_cross_entity_pair_forms_at_low_confidence() -> None:
+    """v2.8.4 — cross-entity same-page same-name records now pair via
+    the relaxed-tag fallback at reduced pairing_confidence (< 0.6).
+    Pre-v2.8.4 Phase 19 strict-refuse blocked legitimate cross-doc
+    mutations where descriptor tags differ because the value itself
+    changed (e.g. '1000KVA XFMR' ↔ '100KVA XFMR'). Weak-pair signal
+    lets reranker / judge investigate."""
     from interlock.align.exact import align_exact
     from interlock.extract.parameters import ParameterRecord
 
@@ -449,8 +453,9 @@ def test_cross_entity_pair_refuses_to_form() -> None:
         entity_tag="XFMR-002",
     )
     pairs = align_exact([a], [b])
-    assert pairs == [], (
-        "Phase 19 same-entity rule should refuse to pair across different entities"
+    assert len(pairs) == 1
+    assert pairs[0].pairing_confidence < 0.6, (
+        "tag-mismatch pair must surface as weak so rerank can review"
     )
 
 
