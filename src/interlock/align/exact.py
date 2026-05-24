@@ -109,24 +109,45 @@ def align_exact(
 
     def _filtered_pool(ra: ParameterRecord) -> list[ParameterRecord]:
         """Candidate B records for ``ra`` after all *identity* filters —
-        page, entity-tag agreement, and family prefix for string-valued
+        page, entity-tag compatibility, and family prefix for string-valued
         params. Does NOT subtract ``used_b``. Used both for choosing the
         best candidate and for measuring the bucket's true ambiguity
         (count + y-degeneracy) so the gate behaves consistently across
-        iterations within one (page, name) bucket."""
-        pool = [
+        iterations within one (page, name) bucket.
+
+        v2.8.4 — strict-tag pass first, then relaxed fallback. Strict
+        keeps the current Phase 19 / Sprint 5a behavior (exact tag match
+        or both empty). The relaxed fallback kicks in only when strict
+        pool is empty: same page + same name + dim-compatible regardless
+        of tag, paired with a low pairing_confidence so weak pairs are
+        flagged for reranker review. This unblocks cross-doc mutations
+        where Track 2 LLM emits descriptor-tags like '1000KVA XFMR' on
+        one side while Track 1 regex emits row-marker tags like '1' on
+        the other.
+        """
+        same_page = [
             rb
             for rb in by_name_b.get(ra.name.strip().lower(), [])
             if rb.page == ra.page
         ]
+        # Strict pass: identical tags (or both empty).
         if ra.entity_tag:
-            pool = [rb for rb in pool if rb.entity_tag == ra.entity_tag]
+            strict = [rb for rb in same_page if rb.entity_tag == ra.entity_tag]
         else:
-            pool = [rb for rb in pool if not rb.entity_tag]
+            strict = [rb for rb in same_page if not rb.entity_tag]
         if ra.normalized_magnitude is None:
             fam_a = _string_family(ra.raw_value)
-            pool = [rb for rb in pool if _string_family(rb.raw_value) == fam_a]
-        return pool
+            strict = [rb for rb in strict if _string_family(rb.raw_value) == fam_a]
+        if strict:
+            return strict
+        # v2.8.4 — relaxed fallback. Same page + same name; ignore tag.
+        # Keep the family filter for string-valued params (e.g. fuse
+        # designation families must still match — different fuse classes
+        # are not interchangeable even when tags differ).
+        if ra.normalized_magnitude is None:
+            fam_a = _string_family(ra.raw_value)
+            return [rb for rb in same_page if _string_family(rb.raw_value) == fam_a]
+        return same_page
 
     out: list[AlignedPair] = []
     used_b: set[int] = set()
@@ -170,13 +191,24 @@ def align_exact(
             # Ambiguity fallback: value-equal candidate is our only signal.
             # Pair is genuine ("same value, no contradiction") but we have
             # no positional evidence so confidence stays low.
+            # v2.8.4 — confidence further reduced when tags differ.
+            vm_tag_match = bool(ra.entity_tag) == bool(value_match.entity_tag) and (
+                ra.entity_tag == value_match.entity_tag
+                if ra.entity_tag
+                else True
+            )
+            vm_pconf = (
+                1.0 if (tag_anchored and vm_tag_match)
+                else 0.5 if vm_tag_match
+                else 0.4
+            )
             out.append(
                 AlignedPair(
                     a=ra,
                     b=value_match,
                     name_match_confidence=1.0,
                     value_equivalent=True,
-                    pairing_confidence=1.0 if tag_anchored else 0.5,
+                    pairing_confidence=vm_pconf,
                 )
             )
             continue
@@ -185,10 +217,20 @@ def align_exact(
             continue
         used_b.add(id(best_rb))
         # Positional pair confidence depends on how unambiguous the
-        # bucket was. Tag-anchored = 1.0; single-instance on both sides
-        # = 0.9; multi-instance equal-count distinct-y = 0.75.
-        if tag_anchored:
+        # bucket was. Tag-anchored exact match = 1.0; single-instance on
+        # both sides = 0.9; multi-instance equal-count distinct-y = 0.75.
+        # v2.8.4: when the strict-tag pool was empty and we matched via
+        # the relaxed fallback (tags differ), drop confidence so the
+        # reranker has a clear weak-pair signal to investigate.
+        tag_match = bool(ra.entity_tag) == bool(best_rb.entity_tag) and (
+            ra.entity_tag == best_rb.entity_tag
+            if ra.entity_tag
+            else True
+        )
+        if tag_anchored and tag_match:
             pconf = 1.0
+        elif not tag_match:
+            pconf = 0.55  # tag mismatch — weak pair; reranker / judge inspects
         elif n_a <= 1 and n_b <= 1:
             pconf = 0.9
         else:

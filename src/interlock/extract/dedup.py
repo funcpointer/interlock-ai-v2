@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections.abc import Iterable
 
 from interlock.extract.parameters import ParameterRecord
@@ -137,6 +138,34 @@ def _is_duplicate(
     return _magnitudes_match(candidate, kept)
 
 
+_NUMERIC_TOKEN = re.compile(r"\d[\d,]*\.?\d*")
+_NON_ALNUM = re.compile(r"[^a-z0-9.%]+")
+
+
+def _normalize_raw_value(raw: str) -> str:
+    """Collapse formatting noise: lowercase, drop all whitespace + most
+    punctuation. So '100 kVA' and '100KVA' compare equal even when one
+    side's Pint normalization failed."""
+    if not raw:
+        return ""
+    s = raw.strip().lower().replace(",", "")
+    return _NON_ALNUM.sub("", s)
+
+
+def _extract_magnitude_from_raw(raw: str) -> float | None:
+    """Best-effort numeric extraction when normalized_magnitude is None.
+    Returns the FIRST number found in raw_value. Used as a fallback
+    bridge across lanes when one side parsed via Pint and the other
+    didn't (e.g. '100KVA' fails Pint but '100 kVA' succeeds)."""
+    m = _NUMERIC_TOKEN.search(raw or "")
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
 def _magnitudes_match(a: ParameterRecord, b: ParameterRecord) -> bool:
     """Return True when two records describe the same value.
 
@@ -145,8 +174,11 @@ def _magnitudes_match(a: ParameterRecord, b: ParameterRecord) -> bool:
     set.
 
     String path: at least one record lacks numeric normalization (common
-    for string-valued params like ``Fuse Designation``) → fall back to
-    case-insensitive raw_value equality.
+    when LLM emits ``100KVA`` without a separator and Pint refuses to
+    parse it). v2.8.4 — try harder before giving up: (a) compare
+    whitespace/punctuation-stripped raw_values; (b) extract the first
+    numeric token from each side and compare with the same relative
+    tolerance. Returns True if either passes.
     """
     am = a.normalized_magnitude
     bm = b.normalized_magnitude
@@ -156,7 +188,18 @@ def _magnitudes_match(a: ParameterRecord, b: ParameterRecord) -> bool:
         if am == 0 and bm == 0:
             return True
         return math.isclose(am, bm, rel_tol=_MAGNITUDE_RTOL, abs_tol=0.0)
-    # String path.
-    av = (a.raw_value or "").strip().lower()
-    bv = (b.raw_value or "").strip().lower()
-    return av == bv and av != ""
+    # String path — normalize whitespace + punctuation first.
+    av = _normalize_raw_value(a.raw_value)
+    bv = _normalize_raw_value(b.raw_value)
+    if av and av == bv:
+        return True
+    # Numeric fallback: best-effort scrape of leading number from each
+    # raw_value. Catches '100KVA' vs '100 kVA' when only one side's
+    # Pint parse succeeded.
+    fa = am if am is not None else _extract_magnitude_from_raw(a.raw_value)
+    fb = bm if bm is not None else _extract_magnitude_from_raw(b.raw_value)
+    if fa is not None and fb is not None:
+        if fa == 0 and fb == 0:
+            return True
+        return math.isclose(fa, fb, rel_tol=_MAGNITUDE_RTOL, abs_tol=0.0)
+    return False

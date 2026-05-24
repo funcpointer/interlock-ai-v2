@@ -122,3 +122,57 @@ def test_dedup_preserves_input_order_within_lane() -> None:
 
 def test_dedup_empty_input_returns_empty() -> None:
     assert dedup_same_doc_records([]) == []
+
+
+def test_dedup_collapses_whitespace_punct_differences() -> None:
+    """v2.8.4 — '100 kVA' (regex normalized) and '100KVA' (LLM raw) must
+    dedup. Same value, different formatting; cross-lane merge previously
+    failed when Pint refused to parse the no-space form."""
+    r_regex = _rec(
+        page=7, name="Transformer Rating", raw="100 kVA",
+        mag=100_000.0, unit="kilovolt_ampere", extraction_lane="regex",
+        entity_tag="1",
+    )
+    r_llm = _rec(
+        page=7, name="Transformer Rating", raw="100KVA",
+        mag=None, unit=None, extraction_lane="llm_text",
+        entity_tag="100KVA XFMR",
+    )
+    out = dedup_same_doc_records([r_regex, r_llm])
+    assert len(out) == 1
+    assert out[0].extraction_lane == "llm_text", (
+        "lane priority: llm_text > regex"
+    )
+
+
+def test_dedup_numeric_fallback_when_only_one_side_pint_parsed() -> None:
+    """v2.8.4 — same numeric value but only one side normalized.
+    First-numeric-token fallback should bridge them."""
+    r1 = _rec(
+        page=3, name="Transformer Impedance", raw="5.75 %",
+        mag=5.75, unit="percent", extraction_lane="regex",
+    )
+    r2 = _rec(
+        page=3, name="Transformer Impedance", raw="5.75%Z, liquid",
+        mag=None, unit=None, extraction_lane="vision",
+        entity_tag="1000KVA XFMR",
+    )
+    out = dedup_same_doc_records([r1, r2])
+    assert len(out) == 1
+    assert out[0].extraction_lane == "vision"
+
+
+def test_dedup_numeric_fallback_does_not_merge_different_numbers() -> None:
+    """Numeric fallback must still distinguish 5.75 from 0.575 even
+    when one side lacks Pint magnitude — those are the gold TP-1
+    distinct values, not duplicates."""
+    r1 = _rec(
+        page=3, name="Transformer Impedance", raw="5.75 %",
+        mag=5.75, unit="percent", extraction_lane="regex",
+    )
+    r2 = _rec(
+        page=3, name="Transformer Impedance", raw="0.575%Z, liquid",
+        mag=None, unit=None, extraction_lane="vision",
+    )
+    out = dedup_same_doc_records([r1, r2])
+    assert len(out) == 2, "different magnitudes must NOT merge"

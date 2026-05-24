@@ -33,8 +33,12 @@ _PARAM_NAME_ALIASES: dict[str, str] = {
     "z%": "Transformer Impedance",
     "impedance": "Transformer Impedance",
     "impedance %": "Transformer Impedance",
+    "impedance percent": "Transformer Impedance",
     "transformer impedance": "Transformer Impedance",
     "transformer impedance %": "Transformer Impedance",
+    "transformer impedance percent": "Transformer Impedance",
+    "rated impedance": "Transformer Impedance",
+    "per unit impedance": "Transformer Impedance",
     # Full-load amperes
     "ifla": "Full Load Amperes",
     "fla": "Full Load Amperes",
@@ -45,18 +49,58 @@ _PARAM_NAME_ALIASES: dict[str, str] = {
     "fault current": "Fault Current",
     "short-circuit current": "Fault Current",
     "short circuit current": "Fault Current",
+    "available fault current": "Fault Current",
     # Transformer rating
     "transformer rating": "Transformer Rating",
     "kva rating": "Transformer Rating",
     "rated power": "Transformer Rating",
+    "rated capacity": "Transformer Rating",
+    "transformer kva": "Transformer Rating",
+    "transformer size": "Transformer Rating",
     # System voltage
     "system voltage": "System Voltage",
     "voltage": "System Voltage",
     "nominal voltage": "System Voltage",
     "rated voltage": "System Voltage",
-    # Fuse designation (already exact match across lanes most of the time)
+    # Fuse designation
     "fuse designation": "Fuse Designation",
     "fuse part number": "Fuse Designation",
+    "fuse type": "Fuse Designation",
+    "fuse model": "Fuse Designation",
+    # v2.8.4 — collapse LLM/vision name variants for feeders so cross-doc
+    # pairing isn't fragmented across half a dozen near-synonyms.
+    "feeder rating": "Feeder Rating",
+    "feeder circuit rating": "Feeder Rating",
+    "feeder current rating": "Feeder Rating",
+    "feeder fuse rating": "Feeder Rating",
+    "feeder amp rating": "Feeder Rating",
+    "feeder ampere rating": "Feeder Rating",
+    "feeder size": "Feeder Rating",
+    # Branch / breaker family
+    "branch circuit rating": "Branch Circuit Rating",
+    "branch circuit breaker rating": "Branch Circuit Rating",
+    "branch rating": "Branch Circuit Rating",
+    "breaker rating": "Branch Circuit Rating",
+    "circuit breaker rating": "Branch Circuit Rating",
+    "branch breaker rating": "Branch Circuit Rating",
+    # Inrush family
+    "inrush duration": "Inrush Duration",
+    "inrush point duration": "Inrush Duration",
+    "inrush multiplier": "Inrush Multiplier",
+    "inrush point multiplier": "Inrush Multiplier",
+    "inrush locked amperes": "Inrush Current",
+    "inrush current": "Inrush Current",
+    # Conductor / cable
+    "conductor size": "Conductor Size",
+    "cable size": "Conductor Size",
+    "wire size": "Conductor Size",
+    "conductor type": "Conductor Type",
+    "cable type": "Conductor Type",
+    "wire type": "Conductor Type",
+    # Generic current
+    "current rating": "Current Rating",
+    "amp rating": "Current Rating",
+    "ampere rating": "Current Rating",
 }
 
 

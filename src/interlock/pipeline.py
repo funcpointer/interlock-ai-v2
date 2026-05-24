@@ -447,6 +447,17 @@ def review_two_documents_full(
         "detect: %d flags from %d pairs (suppress_info=%s) in %.2fs",
         len(flags), len(combined), suppress_info, time.time() - t,
     )
+
+    # v2.8.4 — checklist-gap detector. Surfaces in-scope Doc A unpaired
+    # records (currently Fuse Designation) whose raw_value also does not
+    # appear anywhere in Doc B. Mirrors gold FN-1 (LPN-RK-500SP removed
+    # between revisions).
+    from interlock.detect.checklist import detect_checklist_gaps
+    paired_a_ids_pre = {id(p.a) for p in combined}
+    unpaired_a_pre = [r for r in pa if id(r) not in paired_a_ids_pre]
+    gap_flags = detect_checklist_gaps(unpaired_a_pre, pb, doc_a_id, doc_b_id)
+    if gap_flags:
+        flags = flags + gap_flags
     _stage("detect", "done")
 
     # v2 Sprint 3: annotate provenance. Pure function; zero cost; runs always.

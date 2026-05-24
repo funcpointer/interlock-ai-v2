@@ -211,14 +211,21 @@ def test_entity_tag_mismatch_drops_pair_entirely() -> None:
     assert pairs == []
 
 
-def test_tagged_and_untagged_records_never_cross_pair() -> None:
-    """A tagged Doc A record must not pair with an untagged Doc B
-    record (the tagged side has identity, the untagged side doesn't —
-    can't claim correspondence)."""
+def test_tagged_and_untagged_records_pair_at_low_confidence() -> None:
+    """v2.8.4 — tagged↔untagged is now ALLOWED via the relaxed fallback
+    pool (strict-tag pool is empty here, so fallback kicks in). The pair
+    surfaces with reduced pairing_confidence (< 0.6) so downstream
+    rerank/judge has a clear weak-pair signal to investigate. Pre-v2.8.4
+    behavior (strict refuse) blocked legitimate cross-doc mutations
+    where one side carried an LLM descriptor-tag and the other a regex
+    row-marker tag."""
     a = [_p("Fuse Designation", "A", "KRP-C-1600SP", page=5, y=100, entity_tag="6")]
     b = [_p("Fuse Designation", "B", "KRP-C-1600SP", page=5, y=100, entity_tag="")]
     pairs = align_exact(a, b)
-    assert pairs == []
+    assert len(pairs) == 1
+    assert pairs[0].pairing_confidence < 0.6, (
+        "tag-mismatch pair must signal weak so reranker investigates"
+    )
 
 
 def test_pairing_confidence_reflects_rule_strength() -> None:
