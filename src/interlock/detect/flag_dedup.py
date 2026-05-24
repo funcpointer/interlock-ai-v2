@@ -69,4 +69,40 @@ def dedup_flags_by_b_record(flags: list[Flag]) -> list[Flag]:
         )
     if not dropped:
         logger.debug("flag-dedup: no duplicates across %d flags", len(flags))
+
+    # v2.8.7 — magnitude-key near-miss diagnostic. Same physical anomaly
+    # can fan out across LANES (regex p3 5.75→0.575 + vision/llm p3
+    # 5.75%Z→0.575%Z) with DIFFERENT B records but identical or near-
+    # identical magnitudes. The current b-record-id key keeps both.
+    # Log clusters of size > 1 so triage can decide whether to add a
+    # secondary dedup pass keyed on (canonical_value, page).
+    mag_groups: dict[tuple[str, int, str, str], list[Flag]] = {}
+    for f in out:
+        a_mag = (
+            f"{f.a_record.normalized_magnitude:.4g}"
+            if f.a_record.normalized_magnitude is not None
+            else (f.a_record.raw_value or "").strip().lower()
+        )
+        b_mag = (
+            f"{f.b_record.normalized_magnitude:.4g}"
+            if f.b_record.normalized_magnitude is not None
+            else (f.b_record.raw_value or "").strip().lower()
+        )
+        mkey = (f.parameter, f.a_record.page, a_mag, b_mag)
+        mag_groups.setdefault(mkey, []).append(f)
+    for mkey, mgroup in mag_groups.items():
+        if len(mgroup) > 1:
+            logger.debug(
+                "flag-dedup mag-key near-miss: %s @ A p%d %s↔%s has %d "
+                "flags surviving (different B records). Candidates: %s",
+                mkey[0], mkey[1], mkey[2], mkey[3], len(mgroup),
+                [
+                    (
+                        getattr(f.a_record, "extraction_lane", "regex"),
+                        getattr(f.b_record, "extraction_lane", "regex"),
+                        f.confidence,
+                    )
+                    for f in mgroup
+                ],
+            )
     return out

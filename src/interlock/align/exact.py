@@ -28,11 +28,14 @@ Phase-14 claim layer provides when enabled).
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
 from interlock.extract.parameters import ParameterRecord
 from interlock.extract.units import equivalent
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -214,6 +217,19 @@ def align_exact(
                 None,
             )
             if value_match is None:
+                # v2.8.7 — log refused pair so triage can see WHY TP-3
+                # / similar mutations failed to surface in LLM-on mode.
+                logger.debug(
+                    "align_exact ambiguity-gate refuse: %s p%d ra=%r "
+                    "tag=%r; n_a=%d n_b=%d (count_amb=%s y_degen=%s); "
+                    "pool=[%s]; no value-equal candidate",
+                    ra.name, ra.page, ra.raw_value, ra.entity_tag,
+                    n_a, n_b, count_ambiguous, y_degenerate,
+                    ", ".join(
+                        f"{rb.raw_value!r}(tag={rb.entity_tag!r})"
+                        for rb in same_page
+                    ),
+                )
                 continue
             used_b.add(id(value_match))
             # Ambiguity fallback: value-equal candidate is our only signal.

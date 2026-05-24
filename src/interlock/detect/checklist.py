@@ -81,6 +81,13 @@ def detect_checklist_gaps(
 
     gaps: list[Flag] = []
     migrations = 0
+    logger.debug(
+        "checklist-gap pb snapshot: %d total records, %d pages with values; "
+        "per-page sizes=%s",
+        sum(len(v) for v in b_values_by_page.values()),
+        len(b_values_by_page),
+        {p: len(v) for p, v in sorted(b_values_by_page.items())},
+    )
     for ra in unpaired_a:
         if ra.name not in _GAP_SCOPE:
             continue
@@ -88,9 +95,20 @@ def detect_checklist_gaps(
         if not norm_val:
             continue
         if page_scope:
-            if norm_val in b_values_by_page.get(ra.page, set()):
+            page_set = b_values_by_page.get(ra.page, set())
+            if norm_val in page_set:
                 # Present on the same page in B — alignment miss, not gap.
                 continue
+            # v2.8.7 — when about to flag, dump the page set so triage
+            # can see exactly what IS on this B page (in case the value
+            # ought to be present but didn't make it into the set).
+            sample = sorted(page_set)[:10] if page_set else []
+            logger.debug(
+                "checklist-gap near-miss: %s %r unpaired on A p%d; "
+                "B p%d set size=%d sample=%s; norm_val=%r",
+                ra.name, ra.raw_value, ra.page, ra.page,
+                len(page_set), sample, norm_val,
+            )
             # v2.8.6 — page-scoped strict. Even if the value appears
             # elsewhere in B, a removal from the SAME page (TCC table /
             # spec section context) is a real checklist gap. Log the
