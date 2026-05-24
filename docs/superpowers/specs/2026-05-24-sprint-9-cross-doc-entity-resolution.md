@@ -7,7 +7,9 @@
 **Companion reviews:**
 - `2026-05-24-v2.8.x-adversarial-review.md` (session-internal)
 - `2026-05-24-codex-adversarial-review.md` (Codex first pass)
-- `/Users/kc/Documents/Codex/2026-05-24/take-a-look-at-this-and/sprint-9-double-adversarial-review.md` (Codex hostile double-pass — definitive)
+- `2026-05-24-sprint-9-double-adversarial-review.md` (Codex hostile double-pass + 4 peer-review additions)
+
+The double-adversarial review is an attack list, not a complete contract. Peer review of that file surfaced one hidden contradiction (resolved below in §3.4) and four additional attacks (11–14) now folded into §5.
 
 ---
 
@@ -117,12 +119,39 @@ Stages:
 
 1. **Mention extraction** — every ParameterRecord that names an equipment-bearing entity becomes a `EquipmentMention`. Vision records pass through with `grounding="image_region_grounded"` when their entity_id isn't in the PyMuPDF text (replacing the current hard-drop hallucination guard).
 2. **Context attribution** — table title / section header / diagram name attached to each mention via `context_id`.
-3. **Clustering** — mentions are clustered into Equipment objects. Cluster keys, in priority order:
+3. **Clustering** — mentions are clustered into Equipment objects with one of three statuses:
+
+   ```python
+   class ClusterStatus(StrEnum):
+       confident_cluster = "confident_cluster"
+       ambiguous_cluster = "ambiguous_cluster"
+       forbidden_cluster = "forbidden_cluster"
+   ```
+
+   **confident_cluster** rules (strong evidence — auto-cluster):
    - Same `context_id` + same `row_id` (deterministic table-row grouping)
    - Same identity anchor (part number, equipment label)
    - Same diagram + nearby bbox (within bbox-radius threshold)
-   - **No clustering across context_kind without strong anchor agreement** (prevents Attack 8 — p2 one-line + p5 TCC plot don't auto-merge unless they share a part number or explicit label).
-4. **Parameter attachment** — mutable parameter values from clustered mentions become `Equipment.parameters`.
+
+   **ambiguous_cluster** rules (plausible same equipment but no hard anchor — surface for reviewer, do NOT auto-merge silently):
+   - Same `kind` across mentions
+   - All mentions share the SAME mutable-parameter value (e.g. both say "1000 kVA") — value coincidence raises probability
+   - No identity anchor disagreement
+   - Used for Attack 8 shape: p2 one-line + p5 TCC + p7 schedule all describe a transformer with the same kVA rating but no explicit label. Reviewer confirms or splits.
+
+   **forbidden_cluster** rules (contradictory evidence — never auto-cluster):
+   - Different mutable-parameter values that aren't reconcilable (1000 kVA vs 150 kVA without label disambiguator)
+   - Identity anchor disagreement (LPN-RK-500SP vs JCN 80E)
+
+   Cross-context clustering (Attack 8) is permitted ONLY at `ambiguous_cluster` confidence with the reviewer-resolve loop. Original rule "no clustering across context_kind without strong anchor agreement" is too tight — it would block legitimate same-equipment-across-pages cases. Allowing `ambiguous_cluster` recovers them with an explicit "we're not certain" signal.
+
+4. **Lane conflict resolution** (BEFORE parameter attachment; Attack 12) — multiple lanes claiming the same `(context_id, row_id)` slot with different identity anchors:
+   - Must produce ONE Equipment cluster with `cluster_status="lane_conflict"` substate
+   - Each lane's claim is preserved as a separate mention with its `source_lane` and `evidence_text`
+   - Lane priority for the cluster's `identity_anchors` selection: regex with row marker > LLM ≥ 0.8 confidence > vision `text_layer_grounded` > vision `image_region_grounded` > LLM low-confidence
+   - Reviewer surface: cluster shows "3 lanes disagree on this row's equipment label" with each lane's evidence
+
+5. **Parameter attachment** — mutable parameter values from clustered mentions become `Equipment.parameters`. Conflicting values across mentions of the same equipment surface as `parameter_conflict` (separate from `lane_conflict` which is about identity).
 
 Inventory builder is **vision-aware but not vision-dependent**: works on text-only docs via heuristic anchors.
 
@@ -153,23 +182,41 @@ def match_equipment_across_docs(
 
 Matching algorithm:
 
-1. **Blocking keys** (deterministic, fast):
+1. **Context alias canonicalization** (Attack 11): before equipment-level matching, build a context-alias map. Two contexts (`context_id` values) are aliased when:
+   - Structural fingerprint matches (column headers + row count + section relative position within doc)
+   - OR LLM context-title classifier proposes them as aliases (constrained: input is both doc title lists; output is a bipartite alias proposal; reviewer can override per project)
+   - OR per-project alias map supplies the mapping explicitly
+   Context alias map persists in `Equipment.metadata["aliased_context_id"]` so the matcher uses a stable cross-doc handle.
+
+2. **Blocking keys** (deterministic, fast):
    - `kind` (transformers don't match fuses)
-   - Strong identity anchor exact match (part numbers, row markers within named tables)
-2. **Bipartite assignment** — global Hungarian-style optimization over the blocked candidate set. NOT greedy local pairing.
-3. **Score components** (sum, bounded):
+   - Strong identity anchor exact match (part numbers, row markers within aliased contexts)
+   - Aliased `context_id` agreement (post-canonicalization)
+
+3. **Embedding shortlist with recall guarantee** (Attack 14):
+   - Embedding generates candidate set per A equipment
+   - Shortlist size: minimum k=20, auto-grown when candidate density warrants
+   - Cosine threshold: include all candidates above an absolute threshold (0.3), not just top-k by rank
+   - Recall test as gate: for every `expected_match` in gold, the true B equipment MUST appear in A's shortlist. Recall ≥ 99% asserted by matcher unit test.
+
+4. **Bipartite assignment** — global Hungarian-style optimization over the blocked + shortlisted candidate set. NOT greedy local pairing. Maximizes total score subject to one-to-one constraint.
+
+5. **Score components** (sum, bounded):
    - Identity-anchor agreement (+0.5)
-   - Context agreement (table name, section) (+0.2)
+   - Aliased-context agreement (+0.2)
    - Weak-descriptor Jaccard (+0.1)
    - Page proximity (+0.05 max; tie-breaker only)
    - **Contradiction penalty**: exact-token disagreement on identity anchors → −0.5 (blocks high-confidence match)
    - **Embedding similarity**: candidate-generation only, **never produces final match alone**
-4. **Acceptance rule:**
+
+6. **Acceptance rule:**
    - Top score ≥ 0.6 AND margin over runner-up ≥ 0.1 → `matched`
    - Top score ≥ 0.6 but margin < 0.1 → `ambiguous`
    - Top score < 0.6 but blocking keys agreed → `ambiguous`
    - Contradiction penalty fired → `conflict`
    - Otherwise → `unmatched_a` / `unmatched_b`
+
+7. **Forbidden-match assertion** (Attack 13): for every `expected_no_match` pair in gold, the assigned matching must NOT pair them. Test gate — matcher fails if any forbidden pair surfaces with `status="matched"`.
 
 ### 3.6 Mutation classification (replaces v2.8.x flag emission)
 
@@ -234,7 +281,24 @@ The double-adversarial review demands these BEFORE integration starts. They're s
 
 10. `gold_truth_vs_legacy_flags` — case where v2.8.8 produces a flag set that disagrees with equipment-level gold. Equipment gold wins; v2.9 must reproduce equipment gold even though it breaks the legacy flag.
 
-**Pass condition for Sprint 9 implementation start:** all 10 fixtures authored + their gold YAML written. Implementation begins ONLY when fixtures exist.
+### Peer-review additions (Attacks 11–14)
+
+11. `context_title_renamed_same_structure` — doc_a "TCC3" vs doc_b "Coordination Curve 3"; identical row structure. Context-alias canonicalization must produce aliased `context_id`, equipment in both tables must match.
+
+12. `intra_doc_three_lanes_disagree_on_row_34` — regex says `LPN-RK-500SP`, LLM says `JCN 80E`, vision says blank for the same `(context_id, row_id)`. Inventory must produce ONE Equipment cluster with `cluster_status="lane_conflict"`, each lane's claim preserved as separate mention. Identity anchor selection follows lane priority.
+
+13. `forbidden_match_row_marker_collision` — two rows share row marker `2` across different aliased contexts. Gold's `expected_no_match` block lists this pair as forbidden. Matcher must not match them; test asserts zero forbidden matches.
+
+14. `embedding_shortlist_true_match_at_rank_12` — synthetic 50-equipment doc pair where true match for a specific A equipment is rank 12 by embedding. Shortlist size + cosine threshold must include rank-12 candidates. Recall test asserts true match ∈ shortlist for every gold expected_match.
+
+### Phase 33.0 staging
+
+The "all fixtures before code" gate stands, but split into two stages to avoid PDF authoring blocking the matcher work:
+
+- **Phase 33.0a** (~2hr): synthetic record-level fixtures for all 14 attacks. Constructed via `ParameterRecord` / `Span` / `EquipmentMention` instances directly in pytest fixtures. Gates the matcher + inventory unit tests.
+- **Phase 33.0b** (~1 day): polished PDF fixtures for ingestion + vision integration tests. Gates the e2e tests but NOT the matcher unit tests. Can land in parallel with implementation.
+
+**Pass condition for Sprint 9 implementation start:** all 14 synthetic record-level fixtures (Phase 33.0a) authored + gold YAML written. PDF fixtures (Phase 33.0b) follow.
 
 ---
 
@@ -342,12 +406,23 @@ pairs:
             a_value: "20,000 A"
             b_value: "200,000 A"
 
-    expected_no_match:
-      # Equipment that exists in B but has no A counterpart
+    expected_unmatched_b:
+      # Equipment in B with no A counterpart — surfaces as equipment_added
       - b: "transformer:tcc3_dry_type_annotation"  # the 0.15 MVA XFMR FP trap
         status: unmatched_b
         mutation: equipment_added
         severity: info  # planted FP trap
+
+    expected_no_match:
+      # Pairs that MUST NOT match (Attack 13). Matcher test fails if any
+      # surface with status="matched". Catches false merges that don't
+      # show up in the final flag stream.
+      - a: "transformer:tcc3_table_row_2"
+        b: "transformer:tcc1_table_row_2"
+        reason: "Different aliased contexts; row marker collision is coincidence."
+      - a: "fuse:LPS-RK-225SP_tcc3_table_row_31"
+        b: "fuse:LPS-RK-200SP_tcc1_table_row_11"
+        reason: "Different fuse families."
 
     explicit_ambiguous:
       # Equipment where the matcher MUST abstain (no human-clear answer)
@@ -365,17 +440,18 @@ Legacy record-level expectations (`surfaced`, `suppressed`) move to a derived te
 
 ## 10. Sequencing
 
-- **Phase 33.0** (prerequisite, ~3hr) — author 10 acceptance fixtures + their gold YAML; expand `coordination_study.yaml` to equipment level. NO code changes; data + spec only.
-- **Phase 33.1** (~4hr) — `EquipmentMention` + `Equipment` schemas. Tests offline.
-- **Phase 33.2** (~6hr) — `build_equipment_inventory` for text-only docs (regex + LLM-text only; no vision integration yet). All 10 acceptance fixtures pass on text-only path.
-- **Phase 33.3** (~3hr) — Cross-doc matcher with bipartite assignment + contradiction penalties + ambiguous/conflict states. Unit tests cover Attacks 1–10.
-- **Phase 33.4** (~3hr) — Vision-lane integration with grounding modes; `image_region_grounded` path replaces hallucination guard.
+- **Phase 33.0a** (prerequisite, ~2hr) — synthetic record-level fixtures for all 14 attacks + equipment-level gold YAML expansion. NO code changes; data + spec only. Gates matcher + inventory unit tests.
+- **Phase 33.0b** (parallel, ~1 day) — polished PDF fixtures for ingestion + vision integration tests. Can land in parallel with Phase 33.1+; gates e2e tests only.
+- **Phase 33.1** (~4hr) — `EquipmentMention` + `Equipment` schemas with `ClusterStatus` enum. Tests offline using Phase 33.0a fixtures.
+- **Phase 33.2** (~6hr) — `build_equipment_inventory` for text-only docs (regex + LLM-text only). Cluster status assignment (confident / ambiguous / forbidden / lane_conflict). All 14 record-level fixtures pass.
+- **Phase 33.3** (~4hr) — Cross-doc matcher: context-alias canonicalization, blocking keys, embedding shortlist with recall test, bipartite assignment, contradiction penalties, ambiguous/conflict states. `expected_no_match` test gate.
+- **Phase 33.4** (~3hr) — Vision-lane integration with grounding modes; `image_region_grounded` path replaces hallucination guard. Phase 33.0b PDF fixtures gate e2e.
 - **Phase 33.5** (~4hr) — Pipeline integration. Replaces equipment-bearing parameter paths in align/checklist. Legacy paths stay for non-equipment parameters. Switch tests per §6 gate each retirement.
-- **Phase 33.6** (~2hr) — UI surface: equipment-inventory panel; reviewer can resolve `ambiguous` matches and confirm `image_region_grounded` evidence.
+- **Phase 33.6** (~3hr) — UI surface: equipment-inventory panel; reviewer can resolve `ambiguous_cluster`, `ambiguous` match, `lane_conflict`, and confirm `image_region_grounded` evidence.
 
 Tag at each phase + sprint exit `v2.9.0-cross-doc-entities`.
 
-**Total:** ~25 hours = ~3 dev-days. The prerequisite (Phase 33.0) is ~3hr and gates everything.
+**Total:** ~26 hours implementation + ~2hr Phase 33.0a prerequisite = ~28 hours ≈ 3.5 dev-days. PDF fixtures (Phase 33.0b) parallel.
 
 ---
 
