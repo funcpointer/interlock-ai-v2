@@ -318,4 +318,80 @@ def extract_parameters(
                     entity_tag=entity_tag,
                 )
             )
+
+    # v2.8.7 — secondary per-page pass over CONCATENATED span text.
+    # PyMuPDF's line aggregation puts "1000KVA" and "XFMR" on separate
+    # spans when the column-cell renders them as a 2-line stacked label
+    # (doc_a p7 TCC3 table: row header on line 1, "1000KVA XFMR" on
+    # line 2 + "12 x FLA" on line 3, etc — y-gap exceeds aggregate
+    # threshold). Per-span regex misses these. Concatenating spans by
+    # page with newline separators (regex `\s+` matches `\n`) recovers
+    # cross-line patterns without disturbing per-span extraction.
+    out.extend(_secondary_multiline_pass(spans, already=out))
+    return out
+
+
+def _secondary_multiline_pass(
+    spans: list[Span], already: list[ParameterRecord],
+) -> list[ParameterRecord]:
+    """Run domain-specific patterns on per-page concatenated span text.
+    Emits records ONLY for matches not already produced (deduped on
+    (page, name, raw_value))."""
+    if not spans:
+        return []
+    by_page: dict[int, list[Span]] = {}
+    for s in spans:
+        by_page.setdefault(s.page, []).append(s)
+
+    seen: set[tuple[int, str, str]] = {
+        (r.page, r.name, r.raw_value) for r in already
+    }
+    out: list[ParameterRecord] = []
+    for page, page_spans in by_page.items():
+        # Stable order: same y-then-x bucket the per-span loop sees.
+        sorted_spans = sorted(
+            page_spans,
+            key=lambda s: ((s.bbox[1] + s.bbox[3]) / 2, s.bbox[0]),
+        )
+        page_text = "\n".join(s.text for s in sorted_spans)
+        # Use first span as the carrier for doc_id / source_path /
+        # page-level bbox (full-page bbox is a fair fallback for
+        # multi-line matches that span N records).
+        anchor = sorted_spans[0]
+        xs = [s.bbox[0] for s in sorted_spans] + [s.bbox[2] for s in sorted_spans]
+        ys = [s.bbox[1] for s in sorted_spans] + [s.bbox[3] for s in sorted_spans]
+        page_bbox = (min(xs), min(ys), max(xs), max(ys))
+        for pat in _PATTERNS:
+            for m in pat.regex.finditer(page_text):
+                token = m.group(1)
+                if pat.unit_for_quantity is None:
+                    raw_value = token
+                    mag, unit = None, None
+                else:
+                    raw_value = f"{token} {pat.unit_for_quantity}"
+                    try:
+                        q = normalize_quantity(raw_value)
+                        mag = float(q.magnitude)
+                        unit = str(q.units)
+                    except Exception:
+                        mag, unit = None, None
+                key = (page, canonicalize_param_name(pat.name), raw_value)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(
+                    ParameterRecord(
+                        doc_id=anchor.doc_id,
+                        page=page,
+                        bbox=page_bbox,
+                        section=None,
+                        span_text=m.group(0),
+                        name=canonicalize_param_name(pat.name),
+                        raw_value=raw_value,
+                        normalized_magnitude=mag,
+                        normalized_unit=unit,
+                        source_path=anchor.source_path,
+                        entity_tag="",  # multi-line matches lose row marker
+                    )
+                )
     return out

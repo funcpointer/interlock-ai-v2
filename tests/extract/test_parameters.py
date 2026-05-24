@@ -142,3 +142,49 @@ def test_entity_tag_inherited_by_all_records_from_one_span() -> None:
     records = extract_parameters(spans)
     assert records
     assert all(r.entity_tag == "10" for r in records)
+
+
+def test_multiline_kva_xfmr_captured_by_secondary_pass() -> None:
+    """v2.8.7 — doc_a p7 TCC3 table renders "1000KVA" and "XFMR" on
+    separate visual lines (different y-rows of the Description column).
+    Per-span regex misses these because PyMuPDF's line aggregation
+    keeps them as separate spans (y-gap exceeds aggregate threshold).
+    The secondary per-page concatenation pass joins them with \\n and
+    re-runs the regex (which accepts \\s+ including newlines) to
+    recover the multi-line match. Required for TP-3 to surface in
+    LLM-on FE mode."""
+    spans = [
+        _s("1", page=7, y=100),
+        _s("1000KVA", page=7, y=120),  # separate y → separate span
+        _s("XFMR", page=7, y=140),
+        _s("5.75%Z, liquid", page=7, y=160),
+    ]
+    records = extract_parameters(spans)
+    # Per-span: only "5.75%Z" matches via Transformer Impedance pattern.
+    # Secondary pass: concatenates the page text "1\n1000KVA\nXFMR\n
+    # 5.75%Z..." and re-runs the KVA-XFMR pattern, recovering
+    # "1000KVA XFMR" across the newline.
+    transformer_rating = [
+        r for r in records if r.name == "Transformer Rating"
+    ]
+    assert transformer_rating, (
+        f"expected Transformer Rating record from multi-line aggregation; "
+        f"got {[(r.name, r.raw_value) for r in records]}"
+    )
+    assert any("1000" in r.raw_value for r in transformer_rating)
+
+
+def test_multiline_pass_does_not_duplicate_existing_records() -> None:
+    """v2.8.7 — when per-span regex already extracted a match, the
+    secondary pass must NOT emit a duplicate. Dedup key:
+    (page, canonical_name, raw_value)."""
+    spans = [_s("5.75%Z, liquid", page=3)]
+    records = extract_parameters(spans)
+    impedance = [r for r in records if r.name == "Transformer Impedance"]
+    # One record from per-span; secondary pass sees the same regex
+    # match and skips because the key already exists.
+    assert len(impedance) == 1
+
+
+def test_multiline_pass_empty_when_no_spans() -> None:
+    assert extract_parameters([]) == []

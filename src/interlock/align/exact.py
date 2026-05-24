@@ -70,32 +70,59 @@ def _y_center(r: ParameterRecord) -> float:
 # -> "LPN-RK". Used to gate cross-family pairing of string-valued params.
 _FAMILY_RE = re.compile(r"^([A-Z][A-Z\-]*?)-?\d")
 
-# Sentinel returned when no real alphabetic-prefix family is present.
-# v2.8.5 — the previous fallback returned the full raw_value, which
-# meant any string-valued record with differing raw_value would fail the
-# family filter (e.g. Fault Current values like '20,000A RMS Sym' vs
-# '200,000A RMS Sym' — different strings, same parameter, legitimately
-# distinct magnitudes). Treat sentinel as "no family constraint" at
-# the filter site so those pairs can still match.
+# v2.8.7 — more lenient prefix capture for alpha-leading values where a
+# space or other separator sits between the prefix and the first digit
+# (e.g. "JCN 80E" → "JCN"). The v2.8.5 regex required NO whitespace
+# between prefix and digit; that left "JCN 80E" as _NO_FAMILY, which
+# in turn made the family-equality filter permissive for it → fuse
+# families like LPN-RK incorrectly paired with JCN.
+_FAMILY_LENIENT_RE = re.compile(r"^([A-Z][A-Z\-]*)(?:[\s\-]+)?\d")
+
+# Sentinel returned ONLY when the raw_value has no alphabetic-prefix
+# shape at all (i.e. it starts with a digit, like Fault Current's
+# '20,000A RMS Sym'). v2.8.5 introduced this to keep numeric-leading
+# values poolable; v2.8.7 narrows the scope so alpha-leading values
+# ALWAYS extract a family (preventing the LPN-RK ↔ JCN cross-family
+# bridge bug).
 _NO_FAMILY = "__NO_FAMILY__"
 
 
 def _string_family(raw_value: str) -> str:
-    """Return the alphabetic family prefix of a string-valued parameter,
-    or ``_NO_FAMILY`` if the raw_value has no fuse-style prefix shape.
+    """Return the alphabetic family prefix of a string-valued parameter.
 
-    Callers must skip the family-equality filter when EITHER side is
-    ``_NO_FAMILY`` — otherwise legitimate string-valued numeric params
-    (Fault Current, Inrush Current) get filtered out of the candidate
-    pool by raw-value inequality.
+    Returns ``_NO_FAMILY`` ONLY when ``raw_value`` lacks any alphabetic
+    leading prefix (numeric-leading values like '20,000A RMS Sym').
+    Otherwise extracts the alpha-prefix even when whitespace or other
+    separators sit between it and the first digit run.
+
+    Callers can skip the family-equality filter when EITHER side is
+    ``_NO_FAMILY`` — that's the bridge for numeric Fault Current pairs.
+    Alpha-leading values are always family-constrained.
     """
-    m = _FAMILY_RE.match(raw_value.strip())
-    return m.group(1) if m else _NO_FAMILY
+    stripped = raw_value.strip()
+    if not stripped:
+        return _NO_FAMILY
+    # Numeric-leading? Skip prefix capture (handled by magnitude).
+    if stripped[0].isdigit():
+        return _NO_FAMILY
+    m = _FAMILY_RE.match(stripped)
+    if m:
+        return m.group(1)
+    # Lenient: alpha-leading with whitespace before digit (e.g. "JCN 80E").
+    m2 = _FAMILY_LENIENT_RE.match(stripped)
+    if m2:
+        return m2.group(1)
+    # Alpha-leading but no digit anywhere — use the full alpha-prefix.
+    # Prevents cross-bridging arbitrary string values.
+    alpha_prefix = re.match(r"^[A-Z][A-Z\-]*", stripped)
+    return alpha_prefix.group(0) if alpha_prefix else _NO_FAMILY
 
 
 def _family_compatible(a: str, b: str) -> bool:
     """True when two records' string-families are compatible. ``_NO_FAMILY``
-    on either side is permissive (no constraint)."""
+    on either side is permissive (no constraint) — that path is reserved
+    for numeric-leading raw_values where magnitude comparison handles the
+    semantics."""
     if a == _NO_FAMILY or b == _NO_FAMILY:
         return True
     return a == b
@@ -130,13 +157,18 @@ def align_exact(
     a_counts = _counts(a)
     b_counts = _counts(b)
 
-    def _filtered_pool(ra: ParameterRecord) -> list[ParameterRecord]:
+    def _filtered_pool(ra: ParameterRecord) -> tuple[list[ParameterRecord], bool]:
         """Candidate B records for ``ra`` after all *identity* filters —
         page, entity-tag compatibility, and family prefix for string-valued
         params. Does NOT subtract ``used_b``. Used both for choosing the
         best candidate and for measuring the bucket's true ambiguity
         (count + y-degeneracy) so the gate behaves consistently across
         iterations within one (page, name) bucket.
+
+        Returns ``(pool, strict_anchored)``. ``strict_anchored=True`` when
+        the strict-tag pass produced the pool — the count_ambiguous gate
+        in the caller can be skipped in that case because the strict
+        filter already disambiguated by entity_tag.
 
         v2.8.4 — strict-tag pass first, then relaxed fallback. Strict
         keeps the current Phase 19 / Sprint 5a behavior (exact tag match
@@ -147,6 +179,14 @@ def align_exact(
         where Track 2 LLM emits descriptor-tags like '1000KVA XFMR' on
         one side while Track 1 regex emits row-marker tags like '1' on
         the other.
+
+        v2.8.7 — return strict_anchored flag so caller can bypass the
+        count_ambiguous gate when the strict-tag filter already gave a
+        unique candidate. Pre-v2.8.7 this over-fired: e.g. doc_a p3
+        Transformer Impedance had 1 record with tag='2'; doc_b had 1
+        regex with tag='2' + 1 llm_text untagged. Strict pool = 1
+        candidate (the tag-matched one), but n_b=2 (raw count) →
+        count_amb triggered → value-equal-only → 5.75 ≠ 0.575 → refuse.
         """
         same_page = [
             rb
@@ -165,7 +205,7 @@ def align_exact(
                 if _family_compatible(_string_family(rb.raw_value), fam_a)
             ]
         if strict:
-            return strict
+            return strict, True
         # v2.8.4 — relaxed fallback. Same page + same name; ignore tag.
         # Keep the family filter for string-valued params (e.g. fuse
         # designation families must still match — different fuse classes
@@ -177,15 +217,15 @@ def align_exact(
             return [
                 rb for rb in same_page
                 if _family_compatible(_string_family(rb.raw_value), fam_a)
-            ]
-        return same_page
+            ], False
+        return same_page, False
 
     out: list[AlignedPair] = []
     used_b: set[int] = set()
     for ra in a:
         # Identity-filtered pool: what we *could* pair with if no B were
         # consumed. Drives the ambiguity decision.
-        pool = _filtered_pool(ra)
+        pool, strict_anchored = _filtered_pool(ra)
         if not pool:
             continue
         # What's still available right now (subtract consumed B records).
@@ -211,6 +251,20 @@ def align_exact(
         y_degenerate = (
             len(pool) > 1 and len({_y_center(rb) for rb in pool}) == 1
         )
+        # v2.8.7 — when the strict-tag pool already produced a unique
+        # candidate AND ra carries a real (non-empty) tag, the bucket
+        # is disambiguated by tag IDENTITY. The count_amb gate (built
+        # for tag-less greedy pairing) is over-conservative there and
+        # would block legitimate cross-doc mutations like TP-1 (5.75 →
+        # 0.575 same row marker, but Doc B has an extra untagged
+        # llm_text record that inflates n_b).
+        #
+        # The both-untagged case (ra.entity_tag == "") is NOT a real
+        # disambiguation — it's the absence of one — so the gate must
+        # still apply there (preserves OCR-degeneracy refusal).
+        if strict_anchored and len(pool) == 1 and ra.entity_tag:
+            count_ambiguous = False
+            y_degenerate = False
         if count_ambiguous or y_degenerate:
             value_match = next(
                 (rb for rb in same_page if equivalent(ra.raw_value, rb.raw_value)),

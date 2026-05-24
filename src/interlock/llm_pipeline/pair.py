@@ -50,6 +50,45 @@ class _RerankFailed(Exception):
 
 logger = logging.getLogger(__name__)
 
+_DECIMAL_SHIFT_FACTOR = 3.0  # > 3× magnitude ratio = decimal-shift class
+_NUMERIC_TOKEN_RE = re.compile(r"\d[\d,]*\.?\d*")
+
+
+def _scrape_first_number(s: str) -> float | None:
+    """Best-effort first-numeric-token extraction. Used when Pint
+    normalization failed (e.g. raw '20,000A RMS Sym' isn't parseable
+    as a pure unit but the leading number IS the value)."""
+    m = _NUMERIC_TOKEN_RE.search(s or "")
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _is_decimal_shift_magnitude(pair: AlignedPair) -> bool:
+    """True when ra and rb magnitudes differ by more than
+    ``_DECIMAL_SHIFT_FACTOR`` ×. Considered "obviously a real mutation"
+    regardless of entity-tag mismatch — magnitude evidence outweighs
+    string-name evidence for this class of error.
+
+    Uses normalized_magnitude when both sides have it, else falls back
+    to first-numeric-token scrape (catches '20,000A RMS Sym' shape
+    that Pint refuses to parse)."""
+    a_mag = pair.a.normalized_magnitude
+    b_mag = pair.b.normalized_magnitude
+    if a_mag is None:
+        a_mag = _scrape_first_number(pair.a.raw_value)
+    if b_mag is None:
+        b_mag = _scrape_first_number(pair.b.raw_value)
+    if a_mag is None or b_mag is None:
+        return False
+    if a_mag == 0 or b_mag == 0:
+        return abs(a_mag - b_mag) > 0
+    ratio = max(a_mag, b_mag) / min(a_mag, b_mag)
+    return ratio > _DECIMAL_SHIFT_FACTOR
+
 
 def rerank_weak_pairs(
     pairs: list[AlignedPair],
@@ -106,6 +145,36 @@ def rerank_weak_pairs(
             out.append(p)
             continue
         if v.decline_to_pair:
+            # v2.8.7 — override rerank decline when normalized magnitudes
+            # differ by > 3× (decimal-shift class). The field-trip TP-2
+            # case: 20,000A vs 200,000A with entity_tags 'X1' vs 'Fault X'.
+            # Reranker treated the tag-string difference as evidence of
+            # different entities and declined; the 10× magnitude shift is
+            # textbook decimal-shift mutation that MUST surface. Magnitude
+            # evidence outweighs tag-string evidence for this class.
+            if _is_decimal_shift_magnitude(p):
+                logger.info(
+                    "rerank OVERRIDE decline %s p%d %r ↔ p%d %r — "
+                    "magnitudes differ > 3× (decimal-shift class), "
+                    "ignoring rerank decline rationale: %s",
+                    p.a.name, p.a.page, p.a.raw_value,
+                    p.b.page, p.b.raw_value, v.rationale[:120],
+                )
+                rescored += 1
+                # Preserve the decline rationale as audit trail but use
+                # ra's original pairing_confidence (don't trust rerank's
+                # score either, since it intended to drop the pair).
+                out.append(
+                    replace(
+                        p,
+                        rerank_rationale=(
+                            f"[override: magnitude differs >3×, decline "
+                            f"ignored] {v.rationale}"
+                        ),
+                        reranked=True,
+                    )
+                )
+                continue
             declined += 1
             logger.info(
                 "rerank DECLINED %s p%d %r ↔ p%d %r (orig_pconf=%.2f): %s",

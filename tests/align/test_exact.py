@@ -323,6 +323,42 @@ def test_string_family_no_prefix_does_not_block_pairing() -> None:
     assert pairs[0].value_equivalent is False  # different magnitudes
 
 
+def test_strict_tag_bypass_skips_ambiguity_gate() -> None:
+    """v2.8.7 — when the strict-tag pool produces a unique candidate,
+    the count_ambiguous gate must NOT fire even if raw n_b counts a
+    second untagged record. Field-trip TP-1 reproduction: doc_a p3
+    has 1 regex Transformer Impedance tag='2'; doc_b p3 has 1 regex
+    same-tag '0.575' + 1 llm_text untagged. Pre-v2.8.7 the gate fired
+    (n_b=2 raw count), value-equal fallback refused 5.75 ≠ 0.575,
+    pair dropped — TP-1 only surfaced via semantic align (brittle).
+    Now strict_anchored=True, count_amb bypassed, pair forms."""
+    a = [_p(
+        "Transformer Impedance", "A", "5.75 %",
+        mag=5.75, unit="percent", page=3, y=100, entity_tag="2",
+    )]
+    b = [
+        _p(
+            "Transformer Impedance", "B", "0.575 %",
+            mag=0.575, unit="percent", page=3, y=100, entity_tag="2",
+        ),
+        # The disruptor: untagged llm_text record. Strict pool excludes
+        # it; raw count includes it (inflating n_b to 2).
+        _p(
+            "Transformer Impedance", "B", "0.575 %Z",
+            mag=None, unit=None, page=3, y=150, entity_tag="",
+        ),
+    ]
+    pairs = align_exact(a, b)
+    assert len(pairs) == 1
+    assert pairs[0].b.entity_tag == "2", (
+        "strict-tag candidate (tag='2') must win, not the disruptor"
+    )
+    assert pairs[0].pairing_confidence == 1.0, (
+        "tag-anchored exact match — full confidence"
+    )
+    assert pairs[0].value_equivalent is False
+
+
 def test_string_family_still_blocks_incompatible_fuse_classes() -> None:
     """v2.8.5 — family filter must remain strict when BOTH sides do have
     recognizable alphabetic-prefix families. LPS-RK vs LPN-RK fuses are

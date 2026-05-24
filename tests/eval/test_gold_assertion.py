@@ -146,3 +146,162 @@ def test_gold_tp_3_transformer_rating_surfaces() -> None:
         f"TP-3 regressed. Surfaced flags: "
         f"{[(f.parameter, f.a_record.raw_value, f.b_record.raw_value) for f in result.flags]}"
     )
+
+
+# --- v2.8.7 — LLM-on gold variant ----------------------------------
+#
+# The offline tests above run with all LLM features OFF. That catches
+# offline-deterministic regressions but misses ones in the rerank /
+# judge / vision-lane interaction. The LLM-on variant runs with all
+# LLM-driven features ON and mocks the API calls so it stays offline
+# + cheap. Catches the field-trip TP-2 regression (rerank declined
+# the 20kA↔200kA pair on tag mismatch) that the offline path didn't.
+
+
+def _llm_on_run(mocker) -> object:  # type: ignore[no-untyped-def]
+    """Run the full pipeline with all LLM features ON, mocking each
+    external call with a permissive response."""
+    from unittest.mock import MagicMock
+
+    from interlock.pipeline import review_two_documents_full
+
+    def _resp(text: str) -> MagicMock:
+        block = MagicMock()
+        block.text = text
+        return MagicMock(content=[block])
+
+    # 1. Doc classifier: coordination_study with high confidence.
+    mocker.patch(
+        "interlock.llm_pipeline.classify._call_claude_classify",
+        return_value=_resp(
+            '{"doc_class":"coordination_study","confidence":0.95,'
+            '"reasoning":"test stub","detected_indicators":[],'
+            '"pages_consulted":[1]}'
+        ),
+    )
+
+    # 2. Track 2 LLM text extractor: empty per-page response (regex
+    # carries the load). Permissive — won't add noise.
+    mocker.patch(
+        "interlock.llm_pipeline.extract._call_claude_extract",
+        return_value=_resp('{"claims":[],"page":1,"notes":""}'),
+    )
+
+    # 3. Entity detector: empty per-page response.
+    mocker.patch(
+        "interlock.llm_pipeline.entity_detect._call_claude_entity",
+        return_value=_resp('{"entities":[],"page":1}'),
+    )
+
+    # 4. Pair reranker: re-score weak pairs at 0.85 (above threshold,
+    # not declined). Reroutes pairs through the reranker path without
+    # actually dropping any. Catches the v2.8.7 #B override: when
+    # mocked rationale references both raw_values + declines, override
+    # kicks in for >3× magnitude pairs.
+    mocker.patch(
+        "interlock.llm_pipeline.pair._call_claude_pair",
+        return_value=_resp(
+            '{"score":0.85,"rationale":"stub keeping pair","decline_to_pair":false}'
+        ),
+    )
+
+    # 5. Significance judge: pass-through severity, generic rationale.
+    # call_structured returns (SignificanceJudgment, usage) tuple.
+    from interlock.detect.significance import SignificanceJudgment
+    judgment = SignificanceJudgment(
+        severity="critical",
+        within_typical_tolerance=False,
+        engineering_explanation="stub judge rationale for test",
+        downstream_effects=[],
+        confidence=0.9,
+        cited_clause_ids=[],
+    )
+    mocker.patch(
+        "interlock.detect.significance.call_structured",
+        return_value=(judgment, MagicMock(input_tokens=0, output_tokens=0)),
+    )
+
+    # 6. Vision lane: stub no claims so the vision path runs but adds
+    # nothing. (Real vision-lane calls are expensive + non-deterministic.)
+    mocker.patch(
+        "interlock.llm_pipeline.vision_extract._call_claude_vision",
+        return_value=_resp(
+            '{"page":1,"page_understanding":"stub","page_layout":"diagram",'
+            '"claims":[]}'
+        ),
+    )
+
+    return review_two_documents_full(
+        DOC_A, DOC_B,
+        embed_fn=_trivial_embedder,
+        classify_docs=True,
+        use_llm_extraction=True,
+        use_llm_reranker=True,
+        use_entity_grounding=True,
+        use_llm_judge=True,
+        use_vision_lane=True,
+        same_page_only=False,
+    )
+
+
+def test_gold_llm_on_tp_1_surfaces(mocker) -> None:  # type: ignore[no-untyped-def]
+    """LLM-on variant: TP-1 must still surface through the full
+    pipeline with rerank + judge active."""
+    result = _llm_on_run(mocker)
+    assert _has_flag(
+        result.flags, "Impedance", "5.75", "0.575",
+    ), (
+        f"TP-1 missed in LLM-on mode. Flags: "
+        f"{[(f.parameter, f.a_record.raw_value, f.b_record.raw_value) for f in result.flags]}"
+    )
+
+
+def test_gold_llm_on_tp_2_survives_rerank(mocker) -> None:  # type: ignore[no-untyped-def]
+    """LLM-on variant: TP-2 Fault Current 20kA → 200kA must survive
+    rerank. The field-trip regression (v2.8.7 fix #B) was rerank
+    declining the pair on tag-string mismatch ('X1' vs 'Fault X')."""
+    result = _llm_on_run(mocker)
+    assert _has_flag(
+        result.flags, "Fault Current", "20", "200",
+    ), (
+        f"TP-2 dropped by rerank in LLM-on mode. Flags: "
+        f"{[(f.parameter, f.a_record.raw_value, f.b_record.raw_value) for f in result.flags]}"
+    )
+
+
+def test_gold_llm_on_fn_1_surfaces(mocker) -> None:  # type: ignore[no-untyped-def]
+    """LLM-on variant: checklist gap detector still emits LPN-RK-500SP."""
+    result = _llm_on_run(mocker)
+    gap_flags = [
+        f for f in result.flags
+        if f.authority_rule == "checklist_gap"
+        and "LPN-RK-500SP" in (f.a_record.raw_value or "")
+    ]
+    if not gap_flags:
+        # Diagnostic dump on failure — see where LPN-RK-500SP went.
+        a_records = [
+            (r.extraction_lane, r.page, r.raw_value, r.entity_tag)
+            for r in result.unpaired_a
+            if "LPN-RK-500SP" in (r.raw_value or "")
+        ]
+        b_records = [
+            (r.extraction_lane, r.page, r.raw_value)
+            for r in result.unpaired_b
+            if "LPN-RK-500SP" in (r.raw_value or "")
+        ]
+        paired = [
+            (f.parameter, f.a_record.raw_value, f.a_record.page,
+             f.b_record.raw_value, f.b_record.page)
+            for f in result.flags
+            if "LPN-RK-500SP" in (f.a_record.raw_value or "")
+            or "LPN-RK-500SP" in (f.b_record.raw_value or "")
+        ]
+        raise AssertionError(
+            f"FN-1 missing in LLM-on mode. "
+            f"Doc A unpaired LPN-RK-500SP: {a_records}; "
+            f"Doc B unpaired LPN-RK-500SP: {b_records}; "
+            f"flags with LPN-RK-500SP: {paired}; "
+            f"total unpaired_a={len(result.unpaired_a)} "
+            f"unpaired_b={len(result.unpaired_b)} "
+            f"total flags={len(result.flags)}"
+        )

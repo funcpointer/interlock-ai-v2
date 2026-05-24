@@ -222,3 +222,115 @@ def test_empty_input_returns_empty(monkeypatch) -> None:  # type: ignore[no-unty
     from interlock.llm_pipeline.pair import rerank_weak_pairs
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     assert rerank_weak_pairs([]) == []
+
+
+def _pair_with_mags(
+    a_mag: float, b_mag: float,
+    a_raw: str | None = None, b_raw: str | None = None,
+    a_tag: str = "", b_tag: str = "",
+    a_unit: str | None = "ampere", b_unit: str | None = "ampere",
+    pairing_conf: float = 0.55,
+) -> AlignedPair:
+    a_rec = ParameterRecord(
+        doc_id="a", page=2, bbox=(0, 0, 100, 10), section=None,
+        span_text=a_raw or f"{a_mag} A", name="Fault Current",
+        raw_value=a_raw or f"{a_mag} A",
+        normalized_magnitude=a_mag, normalized_unit=a_unit,
+        entity_tag=a_tag,
+    )
+    b_rec = ParameterRecord(
+        doc_id="b", page=2, bbox=(0, 0, 100, 10), section=None,
+        span_text=b_raw or f"{b_mag} A", name="Fault Current",
+        raw_value=b_raw or f"{b_mag} A",
+        normalized_magnitude=b_mag, normalized_unit=b_unit,
+        entity_tag=b_tag,
+    )
+    return AlignedPair(
+        a=a_rec, b=b_rec,
+        name_match_confidence=1.0, value_equivalent=False,
+        pairing_confidence=pairing_conf,
+    )
+
+
+def test_decline_overridden_when_magnitudes_differ_more_than_3x(
+    mocker, monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """v2.8.7 — rerank decline overridden when normalized magnitudes
+    differ by > 3× (decimal-shift class). Field-trip TP-2 reproduction:
+    20kA vs 200kA with tags 'X1' vs 'Fault X' was being declined by
+    rerank on tag-string mismatch even though the 10× magnitude shift
+    is textbook decimal-shift mutation."""
+    from interlock.llm_pipeline.pair import rerank_weak_pairs
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    p = _pair_with_mags(
+        a_mag=20_000, b_mag=200_000,
+        a_raw="20000 A", b_raw="200000 A",
+        a_tag="X1", b_tag="Fault X",
+    )
+    mocker.patch(
+        "interlock.llm_pipeline.pair._call_claude_pair",
+        return_value=_fake_response(
+            '{"score":0.05,"rationale":"20000 A vs 200000 A different entities","decline_to_pair":true}'
+        ),
+    )
+    out = rerank_weak_pairs([p])
+    assert len(out) == 1, "decline override must keep the pair"
+    assert out[0].reranked is True
+    assert "override" in (out[0].rerank_rationale or "").lower()
+
+
+def test_decline_kept_when_magnitudes_within_3x(
+    mocker, monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """v2.8.7 — override scopes to decimal-shift class. When magnitudes
+    are within 3× (no clear decimal-shift signal), rerank's decline
+    judgment still wins. Prevents the override from masking
+    legitimate cross-entity refusals on small-deviation pairs."""
+    from interlock.llm_pipeline.pair import rerank_weak_pairs
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    p = _pair_with_mags(
+        a_mag=200, b_mag=400,  # 2× — within decimal-shift threshold
+        a_tag="X1", b_tag="X2",
+    )
+    mocker.patch(
+        "interlock.llm_pipeline.pair._call_claude_pair",
+        return_value=_fake_response(
+            # Rationale references the actual raw values so hallucination
+            # guard passes; decline still wins because magnitude ratio
+            # is only 2× (below the 3× threshold).
+            '{"score":0.05,"rationale":"200 A vs 400 A different entities","decline_to_pair":true}'
+        ),
+    )
+    out = rerank_weak_pairs([p])
+    assert out == [], (
+        "2× ratio is not decimal-shift; rerank decline should stand"
+    )
+
+
+def test_decline_override_works_with_unit_string_fallback(
+    mocker, monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """v2.8.7 — Pint refused '20,000A RMS Sym'? Override falls back to
+    numeric-token scrape. Locks the behavior so the field-trip TP-2
+    shape (string-valued, no Pint mag) still triggers the override."""
+    from interlock.llm_pipeline.pair import rerank_weak_pairs
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    p = _pair_with_mags(
+        a_mag=None,  # type: ignore[arg-type]
+        b_mag=None,  # type: ignore[arg-type]
+        a_raw="20,000A RMS Sym",
+        b_raw="200,000A RMS Sym",
+        a_unit=None, b_unit=None,
+        a_tag="X1", b_tag="Fault X",
+    )
+    mocker.patch(
+        "interlock.llm_pipeline.pair._call_claude_pair",
+        return_value=_fake_response(
+            '{"score":0.05,"rationale":"20,000A RMS Sym vs 200,000A RMS Sym different entities","decline_to_pair":true}'
+        ),
+    )
+    out = rerank_weak_pairs([p])
+    assert len(out) == 1, (
+        "numeric-scrape fallback must trigger override even when "
+        "Pint magnitudes are None"
+    )
