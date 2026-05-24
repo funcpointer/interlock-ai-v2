@@ -1,21 +1,167 @@
-# Sprint 9 / v2.9 — Cross-Doc Entity Resolution
+# Sprint 9 / v2.9 — Evidence Attribution + Cross-Doc Entity Resolution
 
-**Date:** 2026-05-24 (revised after double-adversarial review)
-**Status:** spec — hardened, awaiting acceptance-fixture authoring before kickoff
+**Date:** 2026-05-24 (v3 — first-principles thesis + invariants)
+**Status:** spec — hardened, awaiting acceptance-fixture authoring before kickoff. STOP REVISING; start Phase 33.0a.
 **Baseline:** `v2.8.8-dedup-page-exact`
-**Target tag:** `v2.9.0-cross-doc-entities`
+**Target tag:** `v2.9.0-evidence-graph`
 **Companion reviews:**
 - `2026-05-24-v2.8.x-adversarial-review.md` (session-internal)
 - `2026-05-24-codex-adversarial-review.md` (Codex first pass)
 - `2026-05-24-sprint-9-double-adversarial-review.md` (Codex hostile double-pass + 4 peer-review additions)
 
-The double-adversarial review is an attack list, not a complete contract. Peer review of that file surfaced one hidden contradiction (resolved below in §3.4) and four additional attacks (11–14) now folded into §5.
+The double-adversarial review is an attack list, not a complete contract. Peer review of that file surfaced one hidden contradiction (resolved below in §3.4) and four additional attacks (11–14) now folded into §5. A subsequent first-principles critique reframed the whole sprint as an evidence-attribution problem — that thesis is now §1.
 
 ---
 
-## 1. Why this sprint (unchanged)
+## 1. Thesis — evidence attribution, not text matching
 
-The v2.8.x patch series shipped 28 surgical fixes for symptoms of one missing core feature: **a per-document equipment inventory + cross-document entity matcher**. Codex's hostile review names the disease: *"the same concept — equipment identity — is re-derived in `exact.py`, `dedup.py`, `checklist.py`, `pair.py`, and the vision guard."* Sprint 9 makes equipment identity an explicit, auditable subsystem.
+Engineering document review is not primarily a text matching problem. It is an **evidence attribution problem**.
+
+The system must answer these six questions, **in order**:
+
+1. **What did the document visibly say?** (raw text, image regions, table structure)
+2. **Where did it say it?** (page, bbox, span, context)
+3. **What equipment mention does that evidence refer to?** (entity-aware extraction)
+4. **Which mentions form the same equipment inside one document?** (intra-doc clustering)
+5. **Which equipment in Doc A corresponds to which equipment in Doc B?** (cross-doc matching)
+6. **Which parameters changed, appeared, disappeared, or became ambiguous?** (mutation classification → flags)
+
+The v2.8.x patch series **started at step 6** (emit flags from paired records) and worked backward, deriving identity, context, and cross-doc correspondence post-hoc from string heuristics. That inversion is why "the same concept — equipment identity — is re-derived in `exact.py`, `dedup.py`, `checklist.py`, `pair.py`, and the vision guard" (Codex's diagnosis).
+
+Sprint 9 **starts at step 1 and moves forward**. Each step produces a typed, audited artifact that the next step consumes. Flags are the bottom of the graph, not the top.
+
+```
+PDF evidence → mentions → equipment entities → cross-doc matches → parameter mutations → flags
+```
+
+---
+
+## 2. Why this sprint
+
+The v2.8.x patch series shipped 28 surgical fixes for symptoms of one missing core feature: **a per-document equipment inventory + cross-document entity matcher**. Codex's hostile review names the disease: *"the same concept — equipment identity — is re-derived in `exact.py`, `dedup.py`, `checklist.py`, `pair.py`, and the vision guard."* Sprint 9 makes equipment identity an explicit, auditable subsystem AND demotes `ParameterRecord` from a pairing-driver to evidence attached to equipment.
+
+---
+
+## 2.1 Invariants / Non-Negotiables
+
+These are the guardrails the implementation cannot drift from. Every reviewer-facing decision, every test, every retirement of a v2.8 heuristic must respect them. Any PR that violates an invariant is rejected, not patched.
+
+1. **`ParameterRecord` cannot create a final flag without either (a) equipment binding or (b) explicit non-equipment classification.** Records are evidence, not flag drivers.
+2. **Mutable parameter values cannot be canonical equipment IDs.** `transformer:1000KVA` is forbidden. `transformer:tcc3_table_row_2` is the shape. The mutation IS the thing we're trying to detect — encoding the mutated value as identity guarantees we fail to detect it.
+3. **Page number cannot be primary identity evidence.** Page locality is a tie-breaker only. Revisions reflow; identity must survive that.
+4. **Embeddings cannot remove candidates from the true-match search space unless recall is tested.** Embedding is for candidate generation, never finalization. Recall ≥ 99% on gold expected_matches asserted by matcher unit tests.
+5. **`ambiguous` is a valid output, not a failure.** The matcher is allowed to abstain. Reviewer resolves; the system surfaces evidence and waits.
+6. **Legacy v2.8 paths must stay until switch tests prove replacement.** No retirement without paired gold-passing both with the heuristic ON and OFF. v2.8.x is the safety net during transition.
+7. **Vision claims without text-layer grounding are not silently dropped.** They get `image_region_grounded` mode with bbox+crop evidence and a lower confidence cap. Hallucination guard becomes evidence-mode triage, not censorship.
+8. **LLMs classify evidence; they don't own identity.** See §2.3 LLM-use policy.
+
+---
+
+## 2.2 Module split (the enforcement mechanism)
+
+The module layout is not cosmetic. It is the boundary that prevents the v2.8 disease from re-emerging — where context extraction, identity clustering, and matching each get re-invented as scattered helpers in other files.
+
+```
+src/interlock/
+  model/
+    equipment.py          ← Data contracts: EquipmentMention, Equipment,
+                            ClusterStatus, EquipmentMatch.
+                            Pure dataclasses + enums. No logic.
+
+  extract/
+    context.py            ← NEW. Document/table/row/section context
+                            extraction. Produces context_id, row_id,
+                            column headers, sibling row signatures.
+                            Owns context-alias canonicalization
+                            (structural fingerprint + LLM proposer).
+
+    equipment_inventory.py ← NEW. Mention clustering + parameter
+                            attachment. Consumes ParameterRecord +
+                            Span + context output. Produces list[Equipment].
+                            Owns ClusterStatus assignment + lane_conflict
+                            resolution.
+
+    parameters.py         ← UNCHANGED structurally. ParameterRecord stays
+                            but becomes evidence attached to equipment,
+                            not a pairing driver. v2.8 alias map retained.
+
+  align/
+    equipment_match.py    ← NEW. Cross-doc bipartite assignment.
+                            Consumes two list[Equipment]. Produces
+                            list[EquipmentMatch] with 5 status states.
+                            Owns embedding shortlist + recall test gate.
+
+    exact.py              ← REDUCED ROLE. Used only for non-equipment-bearing
+                            parameters (system voltages, doc-wide currents).
+                            v2.8 heuristics here retire behind switch tests.
+
+    semantic.py           ← REDUCED ROLE. Same boundary as exact.py.
+
+  detect/
+    equipment_mutations.py ← NEW. Mutation classification on
+                            matched-equipment pairs. Produces value_change /
+                            parameter_added / parameter_removed /
+                            equipment_added / equipment_removed /
+                            ambiguous_match / equipment_conflict flags.
+
+    checklist.py          ← REDUCED ROLE. Becomes a sub-case of
+                            equipment_mutations.py (unmatched_a in
+                            table_row context). Old page-scoped logic
+                            retires behind switch test.
+
+    mismatch.py           ← REDUCED ROLE. Used only for non-equipment-bearing
+                            parameters via legacy align paths.
+
+  llm_pipeline/
+    vision_extract.py     ← UPDATED. Returns claims with grounding mode
+                            (text_layer_grounded / ocr_grounded /
+                            image_region_grounded / heuristic). No hard drops.
+
+    pair.py               ← REDUCED ROLE. Used only for non-equipment-bearing
+                            weak pairs. Decline-override (v2.8.7) retires
+                            behind switch test.
+```
+
+**The rule:** if context extraction, mention clustering, or cross-doc matching logic appears anywhere other than the named module, it's a bug. Reviewer checklist asks "does this belong in `context.py` / `equipment_inventory.py` / `equipment_match.py`?" before merge.
+
+---
+
+## 2.3 LLM-use policy
+
+LLMs are powerful pattern matchers and terrible identity authorities. Sprint 9 uses them, but with explicit constraints.
+
+**LLM is USED for:**
+
+- **Equipment kind classification** (`inventory builder`): given a mention's text + context, classify into `{transformer, fuse, breaker, cable, relay, other}`. Constrained output schema; mention's evidence text passed as proof.
+- **Context alias suggestion** (`context.py`): given two docs' table title lists, propose bipartite alias map. Reviewer confirms; alias map cached per-project.
+- **Ambiguous match explanation** (`equipment_match.py`): when matcher returns `ambiguous`, LLM generates reviewer-facing rationale explaining the candidates + their evidence. Never decides.
+- **Final flag rationale** (`equipment_mutations.py` → `judge`): existing significance-judge path, unchanged.
+
+**LLM is NOT USED for:**
+
+- **Silent identity decisions.** LLM cannot output `canonical_id = "..."` without rule-based blocking-key + score component checks first.
+- **Match finalization.** LLM proposes; deterministic rules accept/reject/abstain. Bipartite assignment is hard math, not chat.
+- **Replacing contradiction rules.** Hard contradictions (exact-token designation disagreement, kind mismatch) are deterministic blocks. LLM cannot override them.
+- **Candidate pruning.** Embedding may rank candidates, but cannot remove them from the search space unless recall is tested.
+
+**Cost discipline:** Every LLM call is cached. Phase 33.0a fixture authoring verifies caches work — no live API call in the matcher unit-test path.
+
+---
+
+## 2.4 Transition cost (v2.8.8 → v2.9 cohabitation)
+
+The Codex first-principles critique skips the transition. This section names it.
+
+The v2.8.8 baseline is the demo path. v2.9 builds in parallel. Cohabitation lasts ≥ Phase 33.1–33.4 (~17 hours of work + review time):
+
+1. **Phase 33.0a–33.4** — v2.8.8 paths remain primary. v2.9 modules are added but NOT wired into the default pipeline. All v2.8.x tests + gold tests pass unchanged.
+2. **Phase 33.5** — pipeline integration adds a `use_equipment_inventory: bool = False` kwarg (default OFF). When ON, equipment-bearing parameter paths route through inventory + matcher. When OFF, v2.8.8 behavior. Both modes tested.
+3. **Phase 33.5 mid-sprint** — switch tests per §6 retirement table. Each retired v2.8 heuristic must pass gold both with the heuristic ON and OFF (via the new path).
+4. **Phase 33.6 + post-sprint** — flip default to `use_equipment_inventory=True`. v2.8.x paths retain compile until v2.10 cleanup sprint.
+
+**Demo path during transition:** `use_equipment_inventory=False` is the safe default. Demo continues on v2.8.8 while v2.9 ships behind the toggle. Switch happens after Phase 33.5 switch tests pass.
+
+**What this costs:** approximately 4–6 hours of duplicate-path maintenance over the sprint. Acceptable price for not breaking the demo path.
 
 ---
 
@@ -45,6 +191,8 @@ These are all baked into §3–§5 below.
 
 ### 3.1 Mention schema
 
+Defined in `src/interlock/model/equipment.py`:
+
 ```python
 @dataclass(frozen=True)
 class EquipmentMention:
@@ -72,6 +220,8 @@ class EquipmentMention:
 ```
 
 ### 3.2 Equipment schema
+
+Defined in `src/interlock/model/equipment.py`:
 
 ```python
 @dataclass(frozen=True)
@@ -104,6 +254,8 @@ Stability rules in priority order:
 `canonical_id` is **never** value-encoded. `"transformer:1000KVA"` is forbidden — that's the v2.8 mistake the review names as "Attack 5: Vision Descriptor Becomes Identity Poison."
 
 ### 3.4 Inventory builder
+
+Defined in `src/interlock/extract/equipment_inventory.py`. Context extraction (used as input) lives in `src/interlock/extract/context.py`.
 
 ```python
 def build_equipment_inventory(
@@ -156,6 +308,8 @@ Stages:
 Inventory builder is **vision-aware but not vision-dependent**: works on text-only docs via heuristic anchors.
 
 ### 3.5 Cross-doc matcher
+
+Schema in `src/interlock/model/equipment.py`. Algorithm in `src/interlock/align/equipment_match.py`.
 
 ```python
 @dataclass(frozen=True)
@@ -220,7 +374,7 @@ Matching algorithm:
 
 ### 3.6 Mutation classification (replaces v2.8.x flag emission)
 
-For each `EquipmentMatch`:
+Defined in `src/interlock/detect/equipment_mutations.py`. For each `EquipmentMatch`:
 
 | Match status | Action |
 |---|---|
@@ -440,38 +594,53 @@ Legacy record-level expectations (`surfaced`, `suppressed`) move to a derived te
 
 ## 10. Sequencing
 
+All v2.9 work happens behind a `use_equipment_inventory: bool = False` pipeline kwarg (see §2.4 transition cost). v2.8.8 remains the default + demo path until Phase 33.5 switch tests pass.
+
 - **Phase 33.0a** (prerequisite, ~2hr) — synthetic record-level fixtures for all 14 attacks + equipment-level gold YAML expansion. NO code changes; data + spec only. Gates matcher + inventory unit tests.
 - **Phase 33.0b** (parallel, ~1 day) — polished PDF fixtures for ingestion + vision integration tests. Can land in parallel with Phase 33.1+; gates e2e tests only.
-- **Phase 33.1** (~4hr) — `EquipmentMention` + `Equipment` schemas with `ClusterStatus` enum. Tests offline using Phase 33.0a fixtures.
-- **Phase 33.2** (~6hr) — `build_equipment_inventory` for text-only docs (regex + LLM-text only). Cluster status assignment (confident / ambiguous / forbidden / lane_conflict). All 14 record-level fixtures pass.
-- **Phase 33.3** (~4hr) — Cross-doc matcher: context-alias canonicalization, blocking keys, embedding shortlist with recall test, bipartite assignment, contradiction penalties, ambiguous/conflict states. `expected_no_match` test gate.
-- **Phase 33.4** (~3hr) — Vision-lane integration with grounding modes; `image_region_grounded` path replaces hallucination guard. Phase 33.0b PDF fixtures gate e2e.
-- **Phase 33.5** (~4hr) — Pipeline integration. Replaces equipment-bearing parameter paths in align/checklist. Legacy paths stay for non-equipment parameters. Switch tests per §6 gate each retirement.
-- **Phase 33.6** (~3hr) — UI surface: equipment-inventory panel; reviewer can resolve `ambiguous_cluster`, `ambiguous` match, `lane_conflict`, and confirm `image_region_grounded` evidence.
+- **Phase 33.1** (~4hr) — `src/interlock/model/equipment.py` schemas: `EquipmentMention`, `Equipment`, `ClusterStatus`, `EquipmentMatch`. Pure dataclasses + enums, no logic. Tests offline using Phase 33.0a fixtures.
+- **Phase 33.2** (~3hr) — `src/interlock/extract/context.py`: context extraction (table title, section header, row markers, column headers, sibling row signatures) + context-alias canonicalization via structural fingerprint. LLM context-title proposer constrained to schema. Unit tests cover Attack 11.
+- **Phase 33.3** (~6hr) — `src/interlock/extract/equipment_inventory.py`: mention extraction, cluster status assignment (confident / ambiguous / forbidden / lane_conflict), parameter attachment, lane-conflict resolution. Text-only docs first; vision integration in Phase 33.5. All 14 record-level fixtures pass.
+- **Phase 33.4** (~4hr) — `src/interlock/align/equipment_match.py`: blocking keys → embedding shortlist (recall ≥ 99% test gate) → bipartite assignment → score components → 5-state acceptance. `expected_no_match` forbidden-match test gate. Covers Attacks 1–6, 13, 14.
+- **Phase 33.5** (~5hr) — `src/interlock/detect/equipment_mutations.py` + vision grounding modes (`llm_pipeline/vision_extract.py` update — no hard drops, returns grounding mode + bbox crop on image-only evidence). Pipeline integration behind `use_equipment_inventory` kwarg. Switch tests per §6 gate each v2.8 heuristic retirement. Covers Attack 9.
+- **Phase 33.6** (~3hr) — UI surface: equipment-inventory panel; reviewer can resolve `ambiguous_cluster`, `ambiguous` match, `lane_conflict`, and confirm `image_region_grounded` evidence. Flip `use_equipment_inventory=True` default. v2.8.x paths retain compile until v2.10 cleanup.
 
-Tag at each phase + sprint exit `v2.9.0-cross-doc-entities`.
+Tag at each phase + sprint exit `v2.9.0-evidence-graph`.
 
-**Total:** ~26 hours implementation + ~2hr Phase 33.0a prerequisite = ~28 hours ≈ 3.5 dev-days. PDF fixtures (Phase 33.0b) parallel.
-
----
-
-## 11. Open questions still
-
-The double-adversarial review left these explicit:
-
-1. **Equipment ontology granularity.** Spec says `kind ∈ {transformer, fuse, breaker, cable, relay, other}`. Sub-types (Class L vs Class RK1 fuse) matter for some matches but not others. Where does sub-type live — in `identity_anchors` or as a separate field?
-2. **Mutable parameter list.** Spec says identity_anchors are immutable; parameters are mutable. But "Transformer Rating" might be either (a transformer's nameplate kVA is usually fixed; a mutation usually means a transcription error). Need an explicit per-kind classification.
-3. **Cross-document context_id matching.** doc_a's `tcc1_table_row_2` must match doc_b's `tcc1_table_row_2`. But what if the table title shifted in B revision ("TCC1" → "Coordination Curve 1")? Need a context_id alias map (cheap LLM call + cache).
-4. **Reviewer override surface.** When matcher returns `ambiguous`, reviewer must resolve. UI for this is in Phase 33.6 but the persistence model (where does the override get saved? per-project?) needs design.
-
-These don't block Sprint 9 kickoff but should be answered during Phase 33.0.
+**Total:** ~27 hours implementation + ~2hr Phase 33.0a prerequisite + 4–6hr transition-path duplicate maintenance = ~33–35 hours ≈ 4–4.5 dev-days. PDF fixtures (Phase 33.0b) parallel.
 
 ---
 
-## 12. Help-or-hurt test (from the double-adversarial review)
+## 11. Open questions deferred into Phase 33.0a fixture authoring
 
-> This double-adversarial pass helps if it changes the spec now. It hurts if it becomes more review theater while implementation proceeds with the current matcher contract.
+These don't block kickoff but get answered while authoring fixtures (Phase 33.0a is where they get pinned by example):
 
-Specifically: this v2 spec is **only worth the rewrite if Phase 33.0 happens before any code**. If we skip the fixture authoring and start Phase 33.1 directly, we're back to v2.8-with-nicer-nouns.
+1. **Equipment ontology granularity.** Sub-types (Class L vs Class RK1 fuse) — fixture #3 (`same_table_similar_fuse_designations`) pins the decision: sub-type lives in `identity_anchors` because exact-token disagreement must block merge.
+2. **Mutable parameter list.** Per-kind classification gets baked into Phase 33.0a equipment-level gold (each Equipment in gold lists its parameters explicitly; what's not listed isn't a parameter).
+3. **Reviewer override persistence model.** Per-project file at `fixtures/projects/<id>/equipment_overrides.yaml`; default empty. Phase 33.6 UI design.
 
-Phase 33.0 gate: 10 acceptance fixtures + gold YAML expansion committed before any `src/interlock/extract/equipment_inventory.py` exists. Enforced via a single CI check (file existence).
+---
+
+## 12. Stop revising
+
+This spec is v3. It has absorbed:
+
+- Codex first-pass adversarial review (angles A–G)
+- Codex hostile double-adversarial review (Attacks 1–10 + 11 missing contracts + minimum spec patch)
+- Peer review of the in-repo summary (Attacks 11–14 + `ambiguous_cluster` resolution + Phase 33.0a/b split)
+- Codex first-principles critique (evidence-attribution thesis + ParameterRecord demotion + module split as enforcement + LLM-use policy + invariants section)
+
+**Further revisions are not the bottleneck.** The bottleneck is Phase 33.0a — 14 synthetic record-level fixtures + equipment-level gold YAML. Without those, the spec is theater.
+
+**Help-or-hurt test:** this spec is only worth the rewrite cost if Phase 33.0a starts now. If the next session opens with another spec review instead of fixture-authoring, the team has chosen review theater over progress and v2.9 will be v2.8 with nicer nouns.
+
+**Phase 33.0a gate (enforced via CI check):** the file `tests/fixtures/equipment/__init__.py` must exist before any `src/interlock/model/equipment.py` exists. A simple pre-commit hook can enforce this.
+
+---
+
+## Companion docs
+
+- `2026-05-24-v2.8.x-adversarial-review.md` — session-internal review of the v2.8.x patch series
+- `2026-05-24-codex-adversarial-review.md` — Codex first pass
+- `2026-05-24-sprint-9-double-adversarial-review.md` — Codex hostile double-pass + peer-review patch (Attacks 11–14)
+- *(this file)* — spec v3 after first-principles critique
