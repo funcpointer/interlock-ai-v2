@@ -1,0 +1,584 @@
+# Phase 33.0a — Equipment Identity Gold YAML
+#
+# Per Sprint 9 spec v3 (docs/superpowers/specs/2026-05-24-sprint-9-cross-doc-entity-resolution.md):
+# this file is the contract that Phases 33.1–33.5 must satisfy. Each
+# entry below is a synthetic adversarial fixture — 14 attack vectors
+# from the Codex double-adversarial review + peer-review patch.
+#
+# Spec §11 invariant: equipment-level gold IS the source of truth.
+# Record-level legacy flags appear only as `expected_legacy_flags`,
+# strictly DERIVED from the equipment + match + mutation graph.
+#
+# Shape per fixture:
+#   name:                stable identifier matching the attack name
+#   description:         one-line summary of the attack vector
+#   synthetic_inputs:    plain-dict ParameterRecord / Span / page_structure
+#                        material the inventory builder consumes
+#   expected_inventory_a: list[Equipment as dict]
+#   expected_inventory_b: list[Equipment as dict]
+#   expected_matches:    list[EquipmentMatch as dict] with status="matched"
+#   expected_no_match:   list[ForbiddenPair as dict] — must NOT match
+#   expected_ambiguous:  list[AmbiguousMatch as dict] — matcher abstains
+#   expected_conflict:   list[ConflictPair as dict] — hard contradiction
+#   expected_mutations:  per-match parameter mutation classifications
+#   expected_legacy_flags: derived final-flag shape (for back-compat tests)
+#
+# Phase 33.1 will introduce src/interlock/model/equipment.py with typed
+# dataclasses; until then this YAML is dict-validated structurally by
+# tests/eval/test_equipment_identity_gold.py.
+
+version: 1
+authored: 2026-05-24
+status: contract-frozen
+companion_spec: docs/superpowers/specs/2026-05-24-sprint-9-cross-doc-entity-resolution.md
+
+# ----------------------------------------------------------------------
+# Attack 1: same rating, different physical transformers
+# ----------------------------------------------------------------------
+# Three 1000 kVA transformers across p3/p5/p7; only p7 mutates to 100kVA.
+# Doc B vision/LLM emits a `1000KVA XFMR` descriptor on p6.
+# Spec contract: 3 matched equipment, 1 value_change on p7. Forbid:
+# any cross-page merge of the three 1000kVA transformer slots.
+
+attacks:
+  - name: three_1000kva_transformers_only_p7_mutates
+    description: |
+      Three distinct 1000kVA transformer slots (p3 TCC1 row 1, p5 TCC2
+      row 1, p7 TCC3 row 1) — only p7 mutates to 100kVA in doc_b. Tests
+      bipartite assignment + same-value coincidence handling.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+          - {page: 5, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc2", row_id: "1", source_lane: "regex"}
+          - {page: 7, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc3", row_id: "1", source_lane: "regex"}
+      doc_b:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+          - {page: 5, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc2", row_id: "1", source_lane: "regex"}
+          - {page: 6, name: "Transformer Rating", raw_value: "1000KVA", normalized_magnitude: null, normalized_unit: null, entity_tag: "1000KVA", context_id: "tcc2_diagram", row_id: null, source_lane: "vision"}
+          - {page: 7, name: "Transformer Rating", raw_value: "100 kVA", normalized_magnitude: 100000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc3", row_id: "1", source_lane: "regex"}
+    expected_inventory_a:
+      - canonical_id: "transformer:tcc1:row_1"
+        kind: transformer
+        identity_anchors: ["tcc1", "row_1"]
+        parameters: {Transformer Rating: "1000 kVA"}
+      - canonical_id: "transformer:tcc2:row_1"
+        kind: transformer
+        identity_anchors: ["tcc2", "row_1"]
+        parameters: {Transformer Rating: "1000 kVA"}
+      - canonical_id: "transformer:tcc3:row_1"
+        kind: transformer
+        identity_anchors: ["tcc3", "row_1"]
+        parameters: {Transformer Rating: "1000 kVA"}
+    expected_inventory_b:
+      - canonical_id: "transformer:tcc1:row_1"
+        kind: transformer
+        parameters: {Transformer Rating: "1000 kVA"}
+      - canonical_id: "transformer:tcc2:row_1"
+        kind: transformer
+        parameters: {Transformer Rating: "1000 kVA"}
+      - canonical_id: "transformer:tcc3:row_1"
+        kind: transformer
+        parameters: {Transformer Rating: "100 kVA"}
+    expected_matches:
+      - a: "transformer:tcc1:row_1"
+        b: "transformer:tcc1:row_1"
+        status: matched
+        mutations: []
+      - a: "transformer:tcc2:row_1"
+        b: "transformer:tcc2:row_1"
+        status: matched
+        mutations: []
+      - a: "transformer:tcc3:row_1"
+        b: "transformer:tcc3:row_1"
+        status: matched
+        mutations:
+          - parameter: "Transformer Rating"
+            kind: value_change
+            a_value: "1000 kVA"
+            b_value: "100 kVA"
+    expected_no_match:
+      - a: "transformer:tcc1:row_1"
+        b: "transformer:tcc3:row_1"
+        reason: "Distinct contexts — row marker collision is coincidence."
+      - a: "transformer:tcc2:row_1"
+        b: "transformer:tcc3:row_1"
+        reason: "Distinct contexts."
+      - a: "transformer:tcc3:row_1"
+        b: "transformer:tcc1:row_1"
+        reason: "Distinct contexts."
+    expected_legacy_flags:
+      - parameter: "Transformer Rating"
+        a_value: "1000 kVA"
+        b_value: "100 kVA"
+        a_page: 7
+        b_page: 7
+        severity: critical
+
+  # ----------------------------------------------------------------------
+  # Attack 2: sparse descriptor eats rich descriptor
+  # ----------------------------------------------------------------------
+  - name: rich_a_sparse_b_duplicate_transformers
+    description: |
+      Doc A has rich descriptor (kVA + impedance + voltage). Doc B has
+      TWO sparse `1000KVA XFMR` transformers (impedance not extracted).
+      Matcher must abstain because no non-mutable anchor distinguishes
+      the two B candidates.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+          - {page: 3, name: "Transformer Impedance", raw_value: "5.75 %", normalized_magnitude: 5.75, normalized_unit: "percent", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+          - {page: 3, name: "Primary Voltage", raw_value: "480 V", normalized_magnitude: 480.0, normalized_unit: "volt", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+      doc_b:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "T1", context_id: "schedule", row_id: "T1", source_lane: "llm_text"}
+          - {page: 3, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "T2", context_id: "schedule", row_id: "T2", source_lane: "llm_text"}
+    expected_inventory_a:
+      - canonical_id: "transformer:tcc1:row_1"
+        kind: transformer
+        parameters:
+          Transformer Rating: "1000 kVA"
+          Transformer Impedance: "5.75 %"
+          Primary Voltage: "480 V"
+    expected_inventory_b:
+      - canonical_id: "transformer:schedule:row_T1"
+        kind: transformer
+        parameters: {Transformer Rating: "1000 kVA"}
+      - canonical_id: "transformer:schedule:row_T2"
+        kind: transformer
+        parameters: {Transformer Rating: "1000 kVA"}
+    expected_ambiguous:
+      - a: "transformer:tcc1:row_1"
+        candidates_b: ["transformer:schedule:row_T1", "transformer:schedule:row_T2"]
+        reason: "Two B candidates with identical rating; no non-mutable anchor distinguishes them."
+
+  # ----------------------------------------------------------------------
+  # Attack 3: similar fuse designations in same table
+  # ----------------------------------------------------------------------
+  - name: same_table_similar_fuse_designations
+    description: |
+      KRP-C-1600SP (Class L) and LPS-RK-225SP (Class RK1) in the same
+      table. One removed locally; appears elsewhere. Embedding will
+      collapse them on context similarity. Matcher must preserve exact
+      part-number identity.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 7, name: "Fuse Designation", raw_value: "KRP-C-1600SP", normalized_magnitude: null, entity_tag: "6", context_id: "tcc3", row_id: "6", source_lane: "regex"}
+          - {page: 7, name: "Fuse Designation", raw_value: "LPS-RK-225SP", normalized_magnitude: null, entity_tag: "31", context_id: "tcc3", row_id: "31", source_lane: "regex"}
+          - {page: 7, name: "Fuse Designation", raw_value: "LPN-RK-500SP", normalized_magnitude: null, entity_tag: "34", context_id: "tcc3", row_id: "34", source_lane: "regex"}
+      doc_b:
+        records:
+          - {page: 7, name: "Fuse Designation", raw_value: "KRP-C-1600SP", normalized_magnitude: null, entity_tag: "6", context_id: "tcc3", row_id: "6", source_lane: "regex"}
+          - {page: 7, name: "Fuse Designation", raw_value: "LPS-RK-225SP", normalized_magnitude: null, entity_tag: "31", context_id: "tcc3", row_id: "31", source_lane: "regex"}
+          # LPN-RK-500SP row removed from doc_b TCC3 table
+          - {page: 2, name: "Fuse Designation", raw_value: "LPN-RK-500SP", normalized_magnitude: null, entity_tag: "", context_id: "one_line", row_id: null, source_lane: "regex"}
+    expected_inventory_a:
+      - canonical_id: "fuse:tcc3:row_6:KRP-C-1600SP"
+        kind: fuse
+        identity_anchors: ["KRP-C-1600SP", "tcc3", "row_6"]
+        parameters: {}
+      - canonical_id: "fuse:tcc3:row_31:LPS-RK-225SP"
+        kind: fuse
+        identity_anchors: ["LPS-RK-225SP", "tcc3", "row_31"]
+        parameters: {}
+      - canonical_id: "fuse:tcc3:row_34:LPN-RK-500SP"
+        kind: fuse
+        identity_anchors: ["LPN-RK-500SP", "tcc3", "row_34"]
+        parameters: {}
+    expected_inventory_b:
+      - canonical_id: "fuse:tcc3:row_6:KRP-C-1600SP"
+        kind: fuse
+      - canonical_id: "fuse:tcc3:row_31:LPS-RK-225SP"
+        kind: fuse
+      - canonical_id: "fuse:one_line:LPN-RK-500SP"
+        kind: fuse
+    expected_matches:
+      - a: "fuse:tcc3:row_6:KRP-C-1600SP"
+        b: "fuse:tcc3:row_6:KRP-C-1600SP"
+        status: matched
+      - a: "fuse:tcc3:row_31:LPS-RK-225SP"
+        b: "fuse:tcc3:row_31:LPS-RK-225SP"
+        status: matched
+      - a: "fuse:tcc3:row_34:LPN-RK-500SP"
+        b: null
+        status: unmatched_a
+        mutation: equipment_removed
+    expected_no_match:
+      - a: "fuse:tcc3:row_6:KRP-C-1600SP"
+        b: "fuse:tcc3:row_31:LPS-RK-225SP"
+        reason: "Different exact part numbers — embedding similarity must not bridge."
+      - a: "fuse:tcc3:row_34:LPN-RK-500SP"
+        b: "fuse:one_line:LPN-RK-500SP"
+        reason: "Same part number but different contexts; matcher should not pair a TCC3-table fuse with a one-line callout."
+    expected_legacy_flags:
+      - parameter: "Fuse Designation"
+        a_value: "LPN-RK-500SP"
+        b_value: "(removed)"
+        a_page: 7
+        b_page: 7
+        authority_rule: "checklist_gap"
+
+  # ----------------------------------------------------------------------
+  # Attack 4: page locality lies
+  # ----------------------------------------------------------------------
+  - name: same_equipment_moved_one_page_wrong_same_page_decoy
+    description: |
+      Doc A table on p7. Doc B revision moves same table to p8. Doc B
+      p7 contains a different table with similar fuse names (decoy).
+      Matcher must use structural context, not page locality, to pick
+      the moved table.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 7, name: "Fuse Designation", raw_value: "LPS-RK-225SP", normalized_magnitude: null, entity_tag: "31", context_id: "tcc3", row_id: "31", source_lane: "regex"}
+      doc_b:
+        records:
+          - {page: 7, name: "Fuse Designation", raw_value: "LPS-RK-200SP", normalized_magnitude: null, entity_tag: "31", context_id: "tcc1", row_id: "31", source_lane: "regex"}
+          - {page: 8, name: "Fuse Designation", raw_value: "LPS-RK-225SP", normalized_magnitude: null, entity_tag: "31", context_id: "tcc3", row_id: "31", source_lane: "regex"}
+    expected_matches:
+      - a: "fuse:tcc3:row_31:LPS-RK-225SP"
+        b: "fuse:tcc3:row_31:LPS-RK-225SP"
+        status: matched
+        rationale: "Matched by aliased context_id (tcc3) and exact part number — NOT by page proximity."
+    expected_no_match:
+      - a: "fuse:tcc3:row_31:LPS-RK-225SP"
+        b: "fuse:tcc1:row_31:LPS-RK-200SP"
+        reason: "Same page in B but different context AND different part number — must not match as decoy."
+
+  # ----------------------------------------------------------------------
+  # Attack 5: vision label = identity poison
+  # ----------------------------------------------------------------------
+  - name: vision_label_contains_mutated_value
+    description: |
+      Vision emits `1000KVA XFMR` as entity_id on doc_a; mutation
+      changes value to `100KVA` in doc_b. Inventory must NOT use the
+      mutated value as identity — must produce value_change, not
+      equipment_removed + equipment_added.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000KVA", normalized_magnitude: null, entity_tag: "1000KVA XFMR", context_id: "tcc1_diagram", row_id: null, source_lane: "vision", grounding: "image_region_grounded"}
+      doc_b:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "100KVA", normalized_magnitude: null, entity_tag: "100KVA XFMR", context_id: "tcc1_diagram", row_id: null, source_lane: "vision", grounding: "image_region_grounded"}
+    expected_inventory_a:
+      - canonical_id: "transformer:tcc1_diagram:p3_loc_centroid"
+        kind: transformer
+        identity_anchors: ["tcc1_diagram"]
+        parameters: {Transformer Rating: "1000KVA"}
+        note: "canonical_id MUST NOT contain '1000KVA' — that's the mutable value."
+    expected_inventory_b:
+      - canonical_id: "transformer:tcc1_diagram:p3_loc_centroid"
+        kind: transformer
+        parameters: {Transformer Rating: "100KVA"}
+    expected_matches:
+      - a: "transformer:tcc1_diagram:p3_loc_centroid"
+        b: "transformer:tcc1_diagram:p3_loc_centroid"
+        status: matched
+        mutations:
+          - parameter: "Transformer Rating"
+            kind: value_change
+            a_value: "1000KVA"
+            b_value: "100KVA"
+    expected_no_match: []
+
+  # ----------------------------------------------------------------------
+  # Attack 6: rich descriptor change → false split
+  # ----------------------------------------------------------------------
+  - name: rating_mutation_same_row_same_context
+    description: |
+      Same transformer row; rating mutated. Identity must be computed
+      BEFORE parameter comparison. Result: 1 matched equipment +
+      1 value_change. NOT split into add+remove.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+          - {page: 3, name: "Transformer Impedance", raw_value: "5.75 %", normalized_magnitude: 5.75, normalized_unit: "percent", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+          - {page: 3, name: "Primary Voltage", raw_value: "480 V", normalized_magnitude: 480.0, normalized_unit: "volt", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+      doc_b:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "100 kVA", normalized_magnitude: 100000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+          - {page: 3, name: "Transformer Impedance", raw_value: "5.75 %", normalized_magnitude: 5.75, normalized_unit: "percent", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+          - {page: 3, name: "Primary Voltage", raw_value: "480 V", normalized_magnitude: 480.0, normalized_unit: "volt", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+    expected_matches:
+      - a: "transformer:tcc1:row_1"
+        b: "transformer:tcc1:row_1"
+        status: matched
+        mutations:
+          - parameter: "Transformer Rating"
+            kind: value_change
+            a_value: "1000 kVA"
+            b_value: "100 kVA"
+
+  # ----------------------------------------------------------------------
+  # Attack 7: table-row context gap
+  # ----------------------------------------------------------------------
+  - name: fuse_present_elsewhere_removed_from_matched_table
+    description: |
+      Fuse removed from doc_b p7 TCC3 table (row 34); still appears on
+      doc_b p2 one-line. Gap flag fires iff matched TABLE contexts
+      agree on row presence — not just iff value missing on page.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 7, name: "Fuse Designation", raw_value: "LPN-RK-500SP", normalized_magnitude: null, entity_tag: "34", context_id: "tcc3", row_id: "34", source_lane: "regex"}
+          - {page: 2, name: "Fuse Designation", raw_value: "LPN-RK-500SP", normalized_magnitude: null, entity_tag: "", context_id: "one_line", row_id: null, source_lane: "regex"}
+      doc_b:
+        records:
+          - {page: 2, name: "Fuse Designation", raw_value: "LPN-RK-500SP", normalized_magnitude: null, entity_tag: "", context_id: "one_line", row_id: null, source_lane: "regex"}
+          # tcc3:row_34 removed
+    expected_matches:
+      - a: "fuse:one_line:LPN-RK-500SP"
+        b: "fuse:one_line:LPN-RK-500SP"
+        status: matched
+      - a: "fuse:tcc3:row_34:LPN-RK-500SP"
+        b: null
+        status: unmatched_a
+        mutation: equipment_removed
+        context: "tcc3 row 34 — table-context removal, not document-wide removal"
+    expected_legacy_flags:
+      - parameter: "Fuse Designation"
+        a_value: "LPN-RK-500SP"
+        b_value: "(removed)"
+        authority_rule: "checklist_gap"
+        context: tcc3
+
+  # ----------------------------------------------------------------------
+  # Attack 8: same equipment across pages → one cluster, not three
+  # ----------------------------------------------------------------------
+  - name: one_equipment_three_mentions_across_pages
+    description: |
+      Single transformer referenced on p2 one-line, p5 TCC, p7 schedule.
+      Inventory must produce ONE Equipment with three mentions, NOT
+      three Equipments. Uses ambiguous_cluster when no explicit label.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 2, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "XFMR-1", context_id: "one_line", row_id: "XFMR-1", source_lane: "llm_text"}
+          - {page: 5, name: "Transformer Rating", raw_value: "1000KVA", normalized_magnitude: null, entity_tag: "1000KVA XFMR", context_id: "tcc2_diagram", row_id: null, source_lane: "vision", grounding: "image_region_grounded"}
+          - {page: 7, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "T1", context_id: "transformer_schedule", row_id: "T1", source_lane: "regex"}
+      doc_b:
+        records:
+          - {page: 2, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "XFMR-1", context_id: "one_line", row_id: "XFMR-1", source_lane: "llm_text"}
+    expected_inventory_a:
+      - canonical_id: "transformer:XFMR-1"
+        kind: transformer
+        cluster_status: ambiguous_cluster
+        identity_anchors: ["XFMR-1"]
+        weak_descriptors: ["1000 kVA", "1000KVA XFMR"]
+        parameters: {Transformer Rating: "1000 kVA"}
+        mention_count: 3
+        note: "Same kVA + label coincidence across 3 contexts → ambiguous_cluster. Reviewer can split if wrong."
+    expected_inventory_b:
+      - canonical_id: "transformer:XFMR-1"
+        kind: transformer
+        parameters: {Transformer Rating: "1000 kVA"}
+    expected_matches:
+      - a: "transformer:XFMR-1"
+        b: "transformer:XFMR-1"
+        status: matched
+
+  # ----------------------------------------------------------------------
+  # Attack 9: vision-only evidence (rotated label)
+  # ----------------------------------------------------------------------
+  - name: rotated_label_image_only
+    description: |
+      Equipment label rotated; PyMuPDF text-layer empty; vision OCR
+      sees it. Must preserve as Equipment with image_region_grounded
+      evidence + medium confidence — NOT dropped by hallucination guard.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000KVA", normalized_magnitude: null, entity_tag: "XFMR-A1 (rotated)", context_id: "one_line", row_id: null, source_lane: "vision", grounding: "image_region_grounded", bbox: [120.0, 200.0, 180.0, 230.0]}
+      doc_b:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000KVA", normalized_magnitude: null, entity_tag: "XFMR-A1 (rotated)", context_id: "one_line", row_id: null, source_lane: "vision", grounding: "image_region_grounded", bbox: [120.0, 200.0, 180.0, 230.0]}
+    expected_inventory_a:
+      - canonical_id: "transformer:one_line:p3_loc_centroid"
+        kind: transformer
+        parameters: {Transformer Rating: "1000KVA"}
+        grounding: image_region_grounded
+        confidence_cap: 0.75
+        note: "MUST NOT be dropped by hallucination guard."
+    expected_matches:
+      - a: "transformer:one_line:p3_loc_centroid"
+        b: "transformer:one_line:p3_loc_centroid"
+        status: matched
+
+  # ----------------------------------------------------------------------
+  # Attack 10: gold truth vs legacy flags
+  # ----------------------------------------------------------------------
+  - name: gold_truth_vs_legacy_flags
+    description: |
+      v2.8.8 flag stream disagrees with equipment-level expectation.
+      Equipment gold wins. v2.9 must reproduce equipment gold even if
+      it breaks a legacy flag.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 7, name: "Transformer Rating", raw_value: "150 KVA", normalized_magnitude: 150000.0, normalized_unit: "kilovolt_ampere", entity_tag: "32", context_id: "tcc3", row_id: "32", source_lane: "llm_text"}
+      doc_b:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000KVA", normalized_magnitude: null, entity_tag: "1000KVA XFMR", context_id: "tcc1_diagram", row_id: null, source_lane: "vision"}
+    expected_matches: []
+    expected_no_match:
+      - a: "transformer:tcc3:row_32"
+        b: "transformer:tcc1_diagram:p3_loc_centroid"
+        reason: "Different contexts + different kinds of evidence. v2.8.x might have paired them on parameter-name; equipment gold forbids it."
+    expected_inventory_a:
+      - canonical_id: "transformer:tcc3:row_32"
+        kind: transformer
+        parameters: {Transformer Rating: "150 KVA"}
+    expected_inventory_b:
+      - canonical_id: "transformer:tcc1_diagram:p3_loc_centroid"
+        kind: transformer
+        parameters: {Transformer Rating: "1000KVA"}
+    expected_legacy_flags_v2_8:
+      # v2.8.x would emit this — equipment gold says it's wrong.
+      - parameter: "Transformer Rating"
+        a_value: "150 KVA"
+        b_value: "1000KVA"
+        verdict: forbidden_by_equipment_gold
+
+  # ----------------------------------------------------------------------
+  # Attack 11: context alias drift
+  # ----------------------------------------------------------------------
+  - name: context_title_renamed_same_structure
+    description: |
+      doc_a context header "TCC3"; doc_b same context header
+      "Coordination Curve 3". Same row structure. Context-alias
+      canonicalization must produce the same aliased context_id so
+      equipment in both contexts matches.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 7, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "TCC3", row_id: "1", source_lane: "regex"}
+      doc_b:
+        records:
+          - {page: 7, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "Coordination Curve 3", row_id: "1", source_lane: "regex"}
+    expected_context_aliases:
+      - canonical: "tcc3"
+        members: ["TCC3", "Coordination Curve 3"]
+    expected_matches:
+      - a: "transformer:tcc3:row_1"
+        b: "transformer:tcc3:row_1"
+        status: matched
+        rationale: "Aliased context_id pairs TCC3 with Coordination Curve 3."
+
+  # ----------------------------------------------------------------------
+  # Attack 12: intra-doc lane conflict
+  # ----------------------------------------------------------------------
+  - name: intra_doc_three_lanes_disagree_on_row_34
+    description: |
+      Three extraction lanes (regex / Track 2 LLM / vision) return
+      different identity claims for the same (context_id, row_id).
+      Inventory must produce ONE Equipment with cluster_status="lane_conflict",
+      each lane's claim preserved as a separate mention.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 7, name: "Fuse Designation", raw_value: "LPN-RK-500SP", normalized_magnitude: null, entity_tag: "34", context_id: "tcc3", row_id: "34", source_lane: "regex"}
+          - {page: 7, name: "Fuse Designation", raw_value: "JCN 80E", normalized_magnitude: null, entity_tag: "34", context_id: "tcc3", row_id: "34", source_lane: "llm_text"}
+          - {page: 7, name: "Fuse Designation", raw_value: "", normalized_magnitude: null, entity_tag: "34", context_id: "tcc3", row_id: "34", source_lane: "vision", grounding: "text_layer_grounded"}
+    expected_inventory_a:
+      - canonical_id: "fuse:tcc3:row_34"
+        kind: fuse
+        cluster_status: lane_conflict
+        identity_anchors: ["LPN-RK-500SP"]
+        note: "Lane priority chose regex+row_marker. Other lanes preserved as mentions; reviewer can override."
+        mention_count: 3
+
+  # ----------------------------------------------------------------------
+  # Attack 13: forbidden matches
+  # ----------------------------------------------------------------------
+  - name: forbidden_match_row_marker_collision
+    description: |
+      Two rows share row marker `2` across different contexts. Matcher
+      must NOT pair them. expected_no_match block asserts the
+      forbidden pair.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "2", context_id: "tcc1", row_id: "2", source_lane: "regex"}
+      doc_b:
+        records:
+          - {page: 7, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "2", context_id: "tcc3", row_id: "2", source_lane: "regex"}
+    expected_no_match:
+      - a: "transformer:tcc1:row_2"
+        b: "transformer:tcc3:row_2"
+        reason: "Distinct contexts; row marker collision is coincidence even though kind+rating match."
+    expected_matches: []
+    expected_unmatched_a:
+      - "transformer:tcc1:row_2"
+    expected_unmatched_b:
+      - "transformer:tcc3:row_2"
+
+  # ----------------------------------------------------------------------
+  # Attack 14: embedding shortlist recall
+  # ----------------------------------------------------------------------
+  - name: embedding_shortlist_true_match_at_rank_12
+    description: |
+      Synthetic 50-equipment pair; the true match for a specific A
+      equipment ranks 12th by embedding similarity. Shortlist with
+      k=20 must include it. Recall test: true match ∈ shortlist for
+      every gold expected_match.
+    synthetic_inputs:
+      doc_a:
+        records:
+          - {page: 3, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+      doc_b:
+        records:
+          # Index 0–10 (top of embedding shortlist) are decoys; index 11 (rank 12) is the true match.
+          # Phase 33.0a fixture builder generates the full 50-element list via the helper below.
+          - {page: 3, name: "Transformer Rating", raw_value: "1000 kVA", normalized_magnitude: 1000000.0, normalized_unit: "kilovolt_ampere", entity_tag: "1", context_id: "tcc1", row_id: "1", source_lane: "regex"}
+        synthetic_decoy_generator:
+          kind: "fifty_transformers_with_one_true_match_at_rank_12"
+          true_match_rank: 12
+          shortlist_min_k: 20
+    expected_recall:
+      true_match_in_shortlist: true
+      shortlist_size_lower_bound: 20
+      embedding_cosine_absolute_threshold: 0.3
+    expected_matches:
+      - a: "transformer:tcc1:row_1"
+        b: "transformer:tcc1:row_1"
+        status: matched
+
+# ----------------------------------------------------------------------
+# Invariants — global assertions across ALL fixtures
+# ----------------------------------------------------------------------
+# Per spec §2.1. Tests in test_equipment_identity_gold.py enforce these
+# structurally for every attack entry.
+
+global_invariants:
+  - id: canonical_id_no_mutable_values
+    description: |
+      canonical_id MUST NOT contain raw mutable parameter values
+      (e.g. "transformer:1000KVA" is forbidden). Encoded substrings
+      that happen to match are flagged for review.
+    test: assert no canonical_id contains a digit-followed-by-unit pattern from any expected parameter value
+  - id: identity_anchors_are_immutable
+    description: |
+      identity_anchors must never contain a mutable parameter value.
+      Parameters live in `parameters`; anchors are stable across mutations.
+    test: assert no identity_anchor matches any value in same Equipment's parameters dict
+  - id: page_not_primary_identity
+    description: |
+      No canonical_id may be solely page-based unless context_id is
+      'diagram' AND no other anchor is available. Page is a tie-breaker.
+    test: assert canonical_id never matches r'^[a-z]+:p\d+$' as the only form
+  - id: ambiguous_is_valid
+    description: |
+      Fixtures may legally produce `ambiguous` matches. Tests asserting
+      "100% recall" without acknowledging ambiguous states are wrong.
+    test: assert test runner treats ambiguous as success when expected
+  - id: legacy_flags_derived_only
+    description: |
+      expected_legacy_flags is OUTPUT, never INPUT. Tests must not
+      construct expected_legacy_flags directly without first computing
+      from expected_matches + expected_mutations.
+    test: pytest convention — expected_legacy_flags fields traceable to mutations
