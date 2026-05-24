@@ -458,6 +458,12 @@ def review_two_documents_full(
     gap_flags = detect_checklist_gaps(unpaired_a_pre, pb, doc_a_id, doc_b_id)
     if gap_flags:
         flags = flags + gap_flags
+
+    # v2.8.6 — flag-level dedup: collapse cross-page-duplicate flags
+    # that all point at the same Doc B record (the "one inconsistency
+    # in B paired against N records in A" shape).
+    from interlock.detect.flag_dedup import dedup_flags_by_b_record
+    flags = dedup_flags_by_b_record(flags)
     _stage("detect", "done")
 
     # v2 Sprint 3: annotate provenance. Pure function; zero cost; runs always.

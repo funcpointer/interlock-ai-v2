@@ -42,6 +42,18 @@ _LANE_PRIORITY: dict[str, int] = {
     "regex": 2,
 }
 
+# v2.8.6 — row-marker regex override: when a regex record carries a
+# digit-only entity_tag (e.g. "1", "32"), its positional anchor is
+# usually MORE reliable for cross-doc pairing than the value-encoding
+# entity_tag emitted by LLM/vision (e.g. "1000KVA XFMR", which changes
+# when the value mutates). For records colliding within a doc, promote
+# the row-marker regex record over its descriptor-tagged peers.
+_ROW_MARKER_RE = re.compile(r"^\d+$")
+
+
+def _is_row_marker_tag(tag: str) -> bool:
+    return bool(_ROW_MARKER_RE.match((tag or "").strip()))
+
 # How far apart (in pages) two records can be and still count as the
 # "same" value. Coordination-study reissues sometimes shift the table
 # from p7 to p8 between revisions; a tight window avoids merging
@@ -81,15 +93,34 @@ def dedup_same_doc_records(
     return out
 
 
+def _effective_priority(rec: ParameterRecord) -> int:
+    """Lane priority with v2.8.6 row-marker promotion.
+
+    Regex records carrying a digit-only entity_tag (table row markers)
+    score better than their nominal lane rank because the row marker
+    is a stronger positional anchor than the value-encoding tags LLM /
+    vision emit. Brings same-row records across docs together when
+    descriptor tags differ due to the very mutation we want to detect.
+    """
+    base = _LANE_PRIORITY.get(rec.extraction_lane, 99)
+    if rec.extraction_lane == "regex" and _is_row_marker_tag(rec.entity_tag):
+        # Slot regex-with-row-marker BETWEEN vision (0) and llm_text (1).
+        # Vision still wins on diagram pages (its (entity, value) tuples
+        # are strongest there); row-marker regex beats LLM-text descriptor
+        # tags everywhere else.
+        return 1  # tie with llm_text; alphabetical fallback in stable sort
+    return base
+
+
 def _dedup_one_doc(
     records: list[ParameterRecord],
 ) -> tuple[list[ParameterRecord], int]:
     """Per-document dedup pass. Returns (kept, dropped_count)."""
-    # Sort by lane priority so the highest-priority record is processed
-    # first for each (name, magnitude) cluster.
+    # Sort by effective priority so the highest-priority record is
+    # processed first for each (name, magnitude) cluster.
     indexed = sorted(
         enumerate(records),
-        key=lambda pair: _LANE_PRIORITY.get(pair[1].extraction_lane, 99),
+        key=lambda pair: _effective_priority(pair[1]),
     )
     kept_keys: list[tuple[ParameterRecord, list[int]]] = []
     drop_idx: set[int] = set()

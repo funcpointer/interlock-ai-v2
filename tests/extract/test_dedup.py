@@ -127,7 +127,12 @@ def test_dedup_empty_input_returns_empty() -> None:
 def test_dedup_collapses_whitespace_punct_differences() -> None:
     """v2.8.4 — '100 kVA' (regex normalized) and '100KVA' (LLM raw) must
     dedup. Same value, different formatting; cross-lane merge previously
-    failed when Pint refused to parse the no-space form."""
+    failed when Pint refused to parse the no-space form.
+
+    v2.8.6 — when regex tag is a row marker (digit-only), regex now WINS
+    over llm_text because row-anchor is stronger than descriptor-tag.
+    Earlier this case had llm_text winning. The dedup itself still
+    happens; only the survivor changes."""
     r_regex = _rec(
         page=7, name="Transformer Rating", raw="100 kVA",
         mag=100_000.0, unit="kilovolt_ampere", extraction_lane="regex",
@@ -140,8 +145,8 @@ def test_dedup_collapses_whitespace_punct_differences() -> None:
     )
     out = dedup_same_doc_records([r_regex, r_llm])
     assert len(out) == 1
-    assert out[0].extraction_lane == "llm_text", (
-        "lane priority: llm_text > regex"
+    assert out[0].extraction_lane == "regex", (
+        "v2.8.6 row-marker promotion: regex with tag='1' beats llm_text"
     )
 
 
@@ -160,6 +165,64 @@ def test_dedup_numeric_fallback_when_only_one_side_pint_parsed() -> None:
     out = dedup_same_doc_records([r1, r2])
     assert len(out) == 1
     assert out[0].extraction_lane == "vision"
+
+
+def test_dedup_row_marker_regex_beats_descriptor_llm_text() -> None:
+    """v2.8.6 — regex record with digit-only entity_tag (row marker like
+    '1' from a TCC table) is a STRONGER positional anchor than the
+    value-encoding entity_tag the LLM emits ('1000KVA XFMR'). When both
+    extract the same value on the same page, keep the regex one so
+    cross-doc pairing has a stable handle the mutated docs share."""
+    r_regex_rowmarker = _rec(
+        page=7, name="Transformer Rating", raw="1000 kVA",
+        mag=1_000_000.0, unit="kilovolt_ampere", extraction_lane="regex",
+        entity_tag="1",  # row marker
+    )
+    r_llm_descriptor = _rec(
+        page=7, name="Transformer Rating", raw="1000 KVA",
+        mag=1_000_000.0, unit="kilovolt_ampere", extraction_lane="llm_text",
+        entity_tag="1000KVA XFMR",  # value-encoding tag
+    )
+    out = dedup_same_doc_records([r_regex_rowmarker, r_llm_descriptor])
+    assert len(out) == 1
+    assert out[0].extraction_lane == "regex"
+    assert out[0].entity_tag == "1"
+
+
+def test_dedup_vision_still_wins_over_row_marker_regex_on_diagrams() -> None:
+    """Row-marker bump must NOT supersede vision priority. Vision returns
+    (entity, value) tuples extracted from page image; trust those on
+    diagrams over even row-anchored regex."""
+    r_vision = _rec(
+        page=8, name="Transformer Rating", raw="1000kVA",
+        mag=1_000_000.0, unit="kilovolt_ampere", extraction_lane="vision",
+        entity_tag="1000kVA",
+    )
+    r_regex_rowmarker = _rec(
+        page=8, name="Transformer Rating", raw="1000 kVA",
+        mag=1_000_000.0, unit="kilovolt_ampere", extraction_lane="regex",
+        entity_tag="1",
+    )
+    out = dedup_same_doc_records([r_vision, r_regex_rowmarker])
+    assert len(out) == 1
+    assert out[0].extraction_lane == "vision"
+
+
+def test_dedup_regex_without_row_marker_loses_to_llm_text() -> None:
+    """Regex with non-digit tag (or empty) stays at base regex priority."""
+    r_regex_no_marker = _rec(
+        page=3, name="Transformer Impedance", raw="5.75 %",
+        mag=5.75, unit="percent", extraction_lane="regex",
+        entity_tag="",  # no row marker
+    )
+    r_llm = _rec(
+        page=3, name="Transformer Impedance", raw="5.75%Z",
+        mag=None, unit=None, extraction_lane="llm_text",
+        entity_tag="1000KVA XFMR",
+    )
+    out = dedup_same_doc_records([r_regex_no_marker, r_llm])
+    assert len(out) == 1
+    assert out[0].extraction_lane == "llm_text"
 
 
 def test_dedup_numeric_fallback_does_not_merge_different_numbers() -> None:

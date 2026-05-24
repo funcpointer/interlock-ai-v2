@@ -122,6 +122,35 @@ Shipped via 7 phase tags (`phase-24.1-classifier-schemas` → `phase-24.7-classi
 
 **Honest scope statement.** See `docs/TDD.md` § "Known limits — Sprint 1 doc-class classifier (v2)" for what generalises vs what's overfit, and which 5 of 8 classes still inherit v1 behaviour end-to-end. The 11-doc partial corpus is acknowledged as smaller than the 20-doc spec target — the remaining 9 real PDFs are a sourcing exercise, not a code blocker.
 
+## v2.8.6 — Post-Sprint-8 demo unblocker (gold-fixture 4-of-4)
+
+Shipped as a patch series on top of `v2.8-vision-lane`:
+
+| Tag | Fix |
+|---|---|
+| v2.8.1 | Bind-leak fix on diagram pages, canonical name alias map, cross-lane dedup |
+| v2.8.3 | Cross-page asymmetric-tag refuse in semantic; visible log level |
+| v2.8.4 | Dedup raw_value whitespace normalization, expanded alias map, `align_exact` relaxed-tag fallback, checklist-gap detector |
+| v2.8.5 | `_string_family` sentinel unblocks string-valued numeric param pairing (Fault Current TP-2) |
+| v2.8.6 | Row-marker dedup priority flip (unblocks TP-3), flag-level dedup, page-scoped checklist gap, rerank verdict logging, gold regression test |
+
+**v2.8.x exit gate (defined explicitly so future drift is detectable):**
+
+1. `{TP-1, TP-2, TP-3, FN-1}` all surface on the locked `doc_a_60pct ↔ doc_b_90pct` pair with deterministic config (no LLM features).
+2. `FP-1` (150 kVA ↔ 0.15 MVA equivalence) does NOT surface.
+3. Cross-page duplicate flags collapse to one per Doc B record identity.
+4. Pipeline is observable: stage entries, per-doc per-param record tally, rerank decisions, every emitted flag all logged at INFO with grep-friendly tags.
+
+**Tripwire test:** `tests/eval/test_gold_assertion.py` asserts all four expectations on every run (slow-marked, offline-deterministic). Catches regression of any v2.8.x heuristic that silently drops a gold TP or surfaces a gold FP.
+
+**Handoff to Sprint 9 / v2.9:**
+
+The v2.8.x patches are *symptomatic* fixes for the missing cross-doc entity resolution layer. Each patch adds a heuristic that v2.9's proper entity-fingerprint subsystem may subsume. Patches are bounded and tested; they don't bake in assumptions that block the v2.9 rewrite. Open at handoff:
+
+- **Class C (different transformers paired across docs)**: doc_a p7 1000kVA-liquid ↔ doc_b p7 150kVA-dry-type still surface as a flag if Track 2 LLM extracts both rows. Cross-doc entity fingerprint is the right fix.
+- **Class E (LLM parameter-name proliferation)**: alias map is a treadmill. Embedding-based clustering at extraction time is the v2.10+ direction.
+- **Page migration handling**: v2.8.6 page-scoped gap is strict (flags same-page removal even when value lives elsewhere). v2.9 may want a "migrated" annotation that's reviewer-visible without being a critical flag.
+
 ## Sprint 8 (v2) — Vision lane for diagram pages (+ Sprint 7-lite structure classifier)
 
 Shipped via 4 phase tags (`phase-32.1-vision-schemas` → `phase-32.4-vision-ui`) on top of `v2.7-eval`. Exit tag: `v2.8-vision-lane`.

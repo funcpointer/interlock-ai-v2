@@ -18,6 +18,7 @@ nothing gets cached.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -45,6 +46,9 @@ class _RerankFailed(Exception):
     Propagated through disk_cache.get_or_compute so the failed attempt
     is NOT cached. Caller falls back to the original Track 1 pair.
     """
+
+
+logger = logging.getLogger(__name__)
 
 
 def rerank_weak_pairs(
@@ -83,16 +87,39 @@ def rerank_weak_pairs(
                 verdicts[idx] = None
 
     out: list[AlignedPair] = []
+    declined = 0
+    rescored = 0
+    api_failures = 0
     for i, p in enumerate(pairs):
         if i not in weak_indices:
             out.append(p)
             continue
         v = verdicts.get(i)
         if v is None:
+            api_failures += 1
+            logger.debug(
+                "rerank API/parse failure on pair %s/p%d %r ↔ %s/p%d %r — "
+                "keeping Track 1 verdict",
+                p.a.doc_id, p.a.page, p.a.raw_value,
+                p.b.doc_id, p.b.page, p.b.raw_value,
+            )
             out.append(p)
             continue
         if v.decline_to_pair:
+            declined += 1
+            logger.info(
+                "rerank DECLINED %s p%d %r ↔ p%d %r (orig_pconf=%.2f): %s",
+                p.a.name, p.a.page, p.a.raw_value,
+                p.b.page, p.b.raw_value, p.pairing_confidence,
+                v.rationale[:120],
+            )
             continue
+        rescored += 1
+        logger.debug(
+            "rerank rescored %s p%d %r ↔ p%d %r: pconf %.2f → %.2f",
+            p.a.name, p.a.page, p.a.raw_value,
+            p.b.page, p.b.raw_value, p.pairing_confidence, v.score,
+        )
         out.append(
             replace(
                 p,
@@ -101,6 +128,11 @@ def rerank_weak_pairs(
                 reranked=True,
             )
         )
+    logger.info(
+        "rerank summary: %d weak pairs → %d kept-rescored, %d declined "
+        "(dropped), %d API failures (kept original)",
+        len(weak_indices), rescored, declined, api_failures,
+    )
     return out
 
 

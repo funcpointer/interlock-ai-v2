@@ -49,29 +49,73 @@ def detect_checklist_gaps(
     all_b_records: list[ParameterRecord],
     doc_a_id: str,
     doc_b_id: str,
+    *,
+    page_scope: bool = True,
 ) -> list[Flag]:
-    """Emit one Flag per Doc-A unpaired record whose raw_value does not
-    appear in any Doc-B record."""
-    b_values: set[str] = {
-        _norm(r.raw_value) for r in all_b_records if r.raw_value
-    }
+    """Emit Flags for Doc-A unpaired records whose raw_value is missing
+    from Doc-B's checklist.
+
+    v2.8.6 — two-pass detector with page-scoping:
+
+    1. **Page-scoped check** (when ``page_scope=True``, default): does
+       ``ra.raw_value`` appear in Doc B records on the SAME page? If yes,
+       no flag (likely an alignment miss, not a gap).
+    2. **Document-wide check**: if missing same-page, does it appear
+       ANYWHERE in Doc B? If yes, this is a "page migration" — the line
+       moved to a different page in the revision. Logged at INFO so the
+       reviewer can see migrations without being flagged, since
+       migrations are normal revision flow.
+    3. If missing both → true checklist gap → emit Flag.
+
+    Pass ``page_scope=False`` for the old document-wide behavior (any
+    occurrence anywhere in B suppresses the gap flag).
+    """
+    b_values_by_page: dict[int, set[str]] = {}
+    b_values_all: set[str] = set()
+    for r in all_b_records:
+        v = _norm(r.raw_value)
+        if not v:
+            continue
+        b_values_by_page.setdefault(r.page, set()).add(v)
+        b_values_all.add(v)
+
     gaps: list[Flag] = []
+    migrations = 0
     for ra in unpaired_a:
         if ra.name not in _GAP_SCOPE:
             continue
         norm_val = _norm(ra.raw_value)
         if not norm_val:
             continue
-        if norm_val in b_values:
-            # Value exists somewhere in B — not a true gap, just an
-            # alignment miss (which the unpaired-records list already
-            # surfaces). Don't double-emit.
-            continue
+        if page_scope:
+            if norm_val in b_values_by_page.get(ra.page, set()):
+                # Present on the same page in B — alignment miss, not gap.
+                continue
+            # v2.8.6 — page-scoped strict. Even if the value appears
+            # elsewhere in B, a removal from the SAME page (TCC table /
+            # spec section context) is a real checklist gap. Log the
+            # cross-page occurrence as informational so the reviewer can
+            # see the "also appears on B p<N>" context, but DO flag.
+            if norm_val in b_values_all:
+                other_pages = sorted([
+                    p for p, vals in b_values_by_page.items()
+                    if norm_val in vals
+                ])
+                migrations += 1
+                logger.info(
+                    "checklist gap with cross-page presence: %s %r "
+                    "missing on B p%d but appears on B p%s — flagging "
+                    "(same-page removal is the gap)",
+                    ra.name, ra.raw_value, ra.page, other_pages,
+                )
+        else:
+            if norm_val in b_values_all:
+                continue
         gaps.append(_make_gap_flag(ra, doc_a_id, doc_b_id))
     if gaps:
         logger.info(
-            "checklist gap: emitted %d flags (params=%s)",
-            len(gaps), sorted({f.parameter for f in gaps}),
+            "checklist gap: emitted %d flags (params=%s); %d migrations noted",
+            len(gaps), sorted({f.parameter for f in gaps}), migrations,
         )
     return gaps
 
