@@ -11,6 +11,10 @@ import pytest
 
 from interlock.cache import disk as disk_cache
 
+# These tests EXERCISE vision_extract_page directly; opt out of the
+# global conftest stub that defaults it to return [].
+pytestmark = pytest.mark.vision_lane
+
 
 def _make_pdf(tmp_path: Path, text: str) -> Path:
     p = tmp_path / "test.pdf"
