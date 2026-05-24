@@ -16,8 +16,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,8 @@ from anthropic import Anthropic
 from interlock.cache import disk as disk_cache
 from interlock.extract.parameters import ParameterRecord
 from interlock.llm_pipeline.schemas.vision_claim import VisionClaim, VisionPageResult
+
+logger = logging.getLogger(__name__)
 
 MODEL = "claude-sonnet-4-5"
 PROMPT_VERSION = "v1"
@@ -39,27 +43,46 @@ def vision_extract_page(
     pdf_path: str, page: int, *, doc_id: str = "",
 ) -> list[ParameterRecord]:
     """Vision-extract claims from one page. [] on any failure."""
+    pdf_label = Path(pdf_path).stem or pdf_path
+    tag = f"{pdf_label}/p{page}"
     if not Path(pdf_path).exists():
+        logger.warning("vision-lane %s missing pdf — skip", tag)
         return []
     page_text = _page_text(pdf_path, page)
     payload = _cache_payload(pdf_path, page, page_text)
 
     def _compute() -> list[ParameterRecord]:
+        t0 = time.time()
         img_b64 = _page_png_b64(pdf_path, page)
         if not img_b64:
+            logger.warning("vision-lane %s render failed — skip", tag)
             return []
+        render_ms = (time.time() - t0) * 1000
         prompt = _build_prompt(page)
+        t1 = time.time()
         try:
             resp = _call_claude_vision(img_b64, prompt)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "vision-lane %s API error: %s — returning []", tag, exc,
+            )
             return []
+        api_ms = (time.time() - t1) * 1000
         text = _response_text(resp)
         loaded = _parse_json(text)
         if loaded is None:
+            logger.warning(
+                "vision-lane %s parse failed — no JSON in response (len=%d) — returning []",
+                tag, len(text),
+            )
             return []
         try:
             wrapped = VisionPageResult(**loaded)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "vision-lane %s schema validation failed: %s — returning []",
+                tag, exc,
+            )
             return []
         # Hallucination guard: each claim's entity_id must be a substring
         # of the page text (case-insensitive). Drops invented IDs.
@@ -68,12 +91,29 @@ def vision_extract_page(
             c for c in wrapped.claims
             if c.entity_id.lower() in page_text_lower
         ]
+        dropped = len(wrapped.claims) - len(kept)
+        if dropped:
+            dropped_ids = [
+                c.entity_id for c in wrapped.claims
+                if c.entity_id.lower() not in page_text_lower
+            ]
+            logger.warning(
+                "vision-lane %s hallucination guard dropped %d/%d claims (ids=%s)",
+                tag, dropped, len(wrapped.claims), dropped_ids,
+            )
+        logger.info(
+            "vision-lane %s MISS render=%.0fms api=%.0fms claims=%d (kept %d/%d) layout=%s",
+            tag, render_ms, api_ms, len(kept), len(kept), len(wrapped.claims),
+            wrapped.page_layout,
+        )
         return [
             _claim_to_record(c, doc_id=doc_id, page=page, source_path=pdf_path)
             for c in kept
         ]
 
-    value, _hit = disk_cache.get_or_compute(_NAMESPACE, payload, _compute)
+    value, hit = disk_cache.get_or_compute(_NAMESPACE, payload, _compute)
+    if hit:
+        logger.info("vision-lane %s HIT claims=%d", tag, len(value))
     return value
 
 

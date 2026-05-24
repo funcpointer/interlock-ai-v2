@@ -10,6 +10,8 @@ Streamlit app can wire Voyage.
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -27,6 +29,8 @@ from interlock.extract.parameters import ParameterRecord, extract_parameters
 from interlock.ingest.pdf import ingest
 from interlock.llm_pipeline.schemas.doc_class import DocClass, DocClassification
 from interlock.store import sqlite as store
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,8 @@ def review_two_documents_full(
         from interlock.llm_pipeline.page_classify import classify_page_structure
         from interlock.llm_pipeline.vision_extract import vision_extract_page
         _stage("vision_extract", "start")
+        vision_t0 = time.time()
+        logger.info("vision-lane stage START doc_a=%s doc_b=%s", doc_a_id, doc_b_id)
 
         def _page_count(path: str) -> int:
             try:
@@ -181,18 +187,28 @@ def review_two_documents_full(
         # diskcached, so this is free on the second call inside the loop).
         diagram_pages_a: list[int] = []
         diagram_pages_b: list[int] = []
+        n_pages_a = _page_count(pdf_a)
+        n_pages_b = _page_count(pdf_b)
         try:
-            for p in range(1, _page_count(pdf_a) + 1):
+            for p in range(1, n_pages_a + 1):
                 if classify_page_structure(pdf_a, p) == "diagram":
                     diagram_pages_a.append(p)
-            for p in range(1, _page_count(pdf_b) + 1):
+            for p in range(1, n_pages_b + 1):
                 if classify_page_structure(pdf_b, p) == "diagram":
                     diagram_pages_b.append(p)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("vision-lane pre-classify failed: %s", exc)
 
         total_pages = len(diagram_pages_a) + len(diagram_pages_b)
+        logger.info(
+            "vision-lane pre-classify A=%d/%d diagram pages, B=%d/%d diagram pages, total=%d",
+            len(diagram_pages_a), n_pages_a,
+            len(diagram_pages_b), n_pages_b,
+            total_pages,
+        )
         done = 0
+        records_a_before = len(pa)
+        records_b_before = len(pb)
 
         def _emit(page: int) -> None:
             if vision_progress_cb is not None:
@@ -204,18 +220,24 @@ def review_two_documents_full(
         for p in diagram_pages_a:
             try:
                 pa = pa + vision_extract_page(pdf_a, p, doc_id=doc_a_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("vision-lane A/p%d unexpected error: %s", p, exc)
             done += 1
             _emit(p)
         for p in diagram_pages_b:
             try:
                 pb = pb + vision_extract_page(pdf_b, p, doc_id=doc_b_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("vision-lane B/p%d unexpected error: %s", p, exc)
             done += 1
             _emit(p)
 
+        added_a = len(pa) - records_a_before
+        added_b = len(pb) - records_b_before
+        logger.info(
+            "vision-lane stage DONE records added A=%d B=%d total=%d in %.1fs",
+            added_a, added_b, added_a + added_b, time.time() - vision_t0,
+        )
         _stage("vision_extract", "done")
 
     # v2 Sprint 2: Track 2 LLM extraction (opt-in via use_llm_extraction).
