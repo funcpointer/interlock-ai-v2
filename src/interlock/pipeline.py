@@ -138,7 +138,18 @@ def review_two_documents_full(
         fut_a = classify_executor.submit(classify_doc, pdf_a)
         fut_b = classify_executor.submit(classify_doc, pdf_b)
 
+    pipeline_t0 = time.time()
+    logger.info(
+        "pipeline START doc_a=%s doc_b=%s same_page_only=%s use_llm_judge=%s "
+        "classify_docs=%s use_llm_extraction=%s use_llm_reranker=%s "
+        "use_entity_grounding=%s use_vision_lane=%s",
+        doc_a_id, doc_b_id, same_page_only, use_llm_judge,
+        classify_docs, use_llm_extraction, use_llm_reranker,
+        use_entity_grounding, use_vision_lane,
+    )
+
     _stage("ingest_a", "start")
+    t = time.time()
     ia = ingest(
         pdf_a,
         doc_id=doc_a_id,
@@ -146,9 +157,13 @@ def review_two_documents_full(
         enable_vision_ocr=enable_vision_ocr,
         ocr_progress_cb=_cb_a,
     )
+    logger.info(
+        "ingest A: %d spans in %.2fs", len(ia.spans), time.time() - t,
+    )
     _stage("ingest_a", "done")
 
     _stage("ingest_b", "start")
+    t = time.time()
     ib = ingest(
         pdf_b,
         doc_id=doc_b_id,
@@ -156,48 +171,61 @@ def review_two_documents_full(
         enable_vision_ocr=enable_vision_ocr,
         ocr_progress_cb=_cb_a,
     )
+    logger.info(
+        "ingest B: %d spans in %.2fs", len(ib.spans), time.time() - t,
+    )
     _stage("ingest_b", "done")
 
     _stage("extract", "start")
+    t = time.time()
     pa = extract_parameters(ia.spans)
     pb = extract_parameters(ib.spans)
+    logger.info(
+        "extract (Track 1 regex): A=%d B=%d records in %.2fs",
+        len(pa), len(pb), time.time() - t,
+    )
     _stage("extract", "done")
+
+    # v2.8.1: page-structure classification. Always runs (heuristic + diskcached,
+    # ~free). Two consumers:
+    #   1. Vision lane routes diagram pages to Sonnet 4.5 Vision.
+    #   2. entity_bind skips diagram pages (PyMuPDF text-layer y is draw-order
+    #      on diagrams, not visual y — the y-enclosure heuristic would
+    #      systematically mis-bind, e.g. transformer %Z to nearest fuse model).
+    import fitz
+    from interlock.llm_pipeline.page_classify import classify_page_structure
+
+    def _page_count(path: str) -> int:
+        try:
+            d = fitz.open(path)
+            n = int(d.page_count)
+            d.close()
+            return n
+        except Exception:
+            return 0
+
+    n_pages_a = _page_count(pdf_a)
+    n_pages_b = _page_count(pdf_b)
+    diagram_pages_a: list[int] = []
+    diagram_pages_b: list[int] = []
+    try:
+        for p in range(1, n_pages_a + 1):
+            if classify_page_structure(pdf_a, p) == "diagram":
+                diagram_pages_a.append(p)
+        for p in range(1, n_pages_b + 1):
+            if classify_page_structure(pdf_b, p) == "diagram":
+                diagram_pages_b.append(p)
+    except Exception as exc:
+        logger.warning("page-classify failed: %s", exc)
 
     # v2 Sprint 8: vision lane for diagram pages. Runs BEFORE Track 2 LLM
     # text extraction so vision-sourced records sit alongside Track 2's
     # text extraction. Per-page routing — only diagram pages call vision.
     if use_vision_lane:
-        import fitz
-        from interlock.llm_pipeline.page_classify import classify_page_structure
         from interlock.llm_pipeline.vision_extract import vision_extract_page
         _stage("vision_extract", "start")
         vision_t0 = time.time()
         logger.info("vision-lane stage START doc_a=%s doc_b=%s", doc_a_id, doc_b_id)
-
-        def _page_count(path: str) -> int:
-            try:
-                d = fitz.open(path)
-                n = int(d.page_count)
-                d.close()
-                return n
-            except Exception:
-                return 0
-
-        # Pre-pass: count diagram pages across A + B (classifier is
-        # diskcached, so this is free on the second call inside the loop).
-        diagram_pages_a: list[int] = []
-        diagram_pages_b: list[int] = []
-        n_pages_a = _page_count(pdf_a)
-        n_pages_b = _page_count(pdf_b)
-        try:
-            for p in range(1, n_pages_a + 1):
-                if classify_page_structure(pdf_a, p) == "diagram":
-                    diagram_pages_a.append(p)
-            for p in range(1, n_pages_b + 1):
-                if classify_page_structure(pdf_b, p) == "diagram":
-                    diagram_pages_b.append(p)
-        except Exception as exc:
-            logger.warning("vision-lane pre-classify failed: %s", exc)
 
         total_pages = len(diagram_pages_a) + len(diagram_pages_b)
         logger.info(
@@ -249,34 +277,77 @@ def review_two_documents_full(
         cls_b = doc_class_b.doc_class if doc_class_b is not None else DocClass.unknown
 
         _stage("llm_extract_a", "start")
+        t = time.time()
         try:
             llm_records_a = extract_claims_from_doc(pdf_a, cls_a, doc_id=doc_a_id)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Track 2 llm_extract A failed: %s", exc)
             llm_records_a = []
         pa = pa + llm_records_a
+        logger.info(
+            "llm_extract A: +%d records (cls=%s) in %.2fs; total A=%d",
+            len(llm_records_a), cls_a.value, time.time() - t, len(pa),
+        )
         _stage("llm_extract_a", "done")
 
         _stage("llm_extract_b", "start")
+        t = time.time()
         try:
             llm_records_b = extract_claims_from_doc(pdf_b, cls_b, doc_id=doc_b_id)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Track 2 llm_extract B failed: %s", exc)
             llm_records_b = []
         pb = pb + llm_records_b
+        logger.info(
+            "llm_extract B: +%d records (cls=%s) in %.2fs; total B=%d",
+            len(llm_records_b), cls_b.value, time.time() - t, len(pb),
+        )
         _stage("llm_extract_b", "done")
+
+    # v2.8.1: cross-lane same-doc dedup. Collapses Track 1 / Track 2 /
+    # vision records that describe the same parameter on the same doc to
+    # prevent the cross-lane duplicate-flag class (vision > llm_text > regex).
+    # Runs AFTER all extraction lanes, BEFORE entity binding.
+    from interlock.extract.dedup import dedup_same_doc_records
+    pa = dedup_same_doc_records(pa)
+    pb = dedup_same_doc_records(pb)
 
     # v2 Sprint 4.5: entity grounding. Runs AFTER Track 2 union-merge so
     # both Track 1 + Track 2 records get bound by the same detector pass.
+    # v2.8.1: diagram_pages_a / diagram_pages_b passed in so the binder
+    # skips diagram pages (where PyMuPDF text-layer y is draw-order ≠
+    # visual y and y-enclosure systematically mis-binds).
     if use_entity_grounding:
         from interlock.extract.entity_bind import bind_records_to_entities
         from interlock.llm_pipeline.entity_detect import detect_entities_for_doc
         _stage("entity_detect", "start")
+        t = time.time()
         try:
             ents_a = detect_entities_for_doc(pdf_a)
             ents_b = detect_entities_for_doc(pdf_b)
-            pa = bind_records_to_entities(pa, ents_a)
-            pb = bind_records_to_entities(pb, ents_b)
-        except Exception:
-            pass  # graceful fallback — leave entity_tags as-is
+            tagged_before_a = sum(1 for r in pa if r.entity_tag)
+            tagged_before_b = sum(1 for r in pb if r.entity_tag)
+            pa = bind_records_to_entities(
+                pa, ents_a, diagram_pages=set(diagram_pages_a),
+            )
+            pb = bind_records_to_entities(
+                pb, ents_b, diagram_pages=set(diagram_pages_b),
+            )
+            tagged_after_a = sum(1 for r in pa if r.entity_tag)
+            tagged_after_b = sum(1 for r in pb if r.entity_tag)
+            n_ents_a = sum(len(v) for v in ents_a.values())
+            n_ents_b = sum(len(v) for v in ents_b.values())
+            logger.info(
+                "entity_detect: A=%d entities, B=%d entities; "
+                "binds A=%d→%d B=%d→%d (skipped %d/%d diagram pages) in %.2fs",
+                n_ents_a, n_ents_b,
+                tagged_before_a, tagged_after_a,
+                tagged_before_b, tagged_after_b,
+                len(diagram_pages_a), len(diagram_pages_b),
+                time.time() - t,
+            )
+        except Exception as exc:
+            logger.warning("entity_detect failed: %s — falling back unbound", exc)
         _stage("entity_detect", "done")
 
     _stage("align", "start")
@@ -290,23 +361,37 @@ def review_two_documents_full(
     else:
         exact = align_exact(pa, pb)
 
+    t = time.time()
     semantic = align_semantic(pa, pb, embed_fn=embed_fn, same_page_only=same_page_only)
     combined = combine_alignments(exact, semantic)
+    logger.info(
+        "align: exact=%d semantic=%d combined=%d pairs (same_page_only=%s) in %.2fs",
+        len(exact), len(semantic), len(combined), same_page_only, time.time() - t,
+    )
 
     # v2 Sprint 4: opt-in LLM pairing reranker. Pure pass-through when off.
     if use_llm_reranker:
         from interlock.llm_pipeline.pair import rerank_weak_pairs
         _stage("rerank", "start")
+        t = time.time()
         try:
             combined = rerank_weak_pairs(combined)
-        except Exception:
-            pass  # API outage / unexpected error → keep Track 1 verdicts
+            logger.info(
+                "rerank: %d pairs reviewed in %.2fs", len(combined), time.time() - t,
+            )
+        except Exception as exc:
+            logger.warning("rerank failed: %s — keeping Track 1 verdicts", exc)
         _stage("rerank", "done")
 
     _stage("align", "done")
 
     _stage("detect", "start")
+    t = time.time()
     flags = detect_flags(combined, suppress_info=suppress_info)
+    logger.info(
+        "detect: %d flags from %d pairs (suppress_info=%s) in %.2fs",
+        len(flags), len(combined), suppress_info, time.time() - t,
+    )
     _stage("detect", "done")
 
     # v2 Sprint 3: annotate provenance. Pure function; zero cost; runs always.
@@ -314,12 +399,16 @@ def review_two_documents_full(
 
     if use_llm_judge and flags:
         _stage("judge", "start")
+        t = time.time()
         flags = [
             apply_judgment_to_flag(
                 f, judge(f, project_id=project_id), project_id=project_id,
             )
             for f in flags
         ]
+        logger.info(
+            "judge: %d flags judged in %.2fs", len(flags), time.time() - t,
+        )
         _stage("judge", "done")
 
     # Compute unpaired sets from the COMBINED aligned-pair list (before
@@ -352,6 +441,17 @@ def review_two_documents_full(
             )
         classify_executor.shutdown(wait=False)
         _stage("classify", "done")
+        logger.info(
+            "classify: A=%s (conf=%.2f) B=%s (conf=%.2f)",
+            doc_class_a.doc_class.value, doc_class_a.confidence,
+            doc_class_b.doc_class.value, doc_class_b.confidence,
+        )
+
+    logger.info(
+        "pipeline END flags=%d unpaired_a=%d unpaired_b=%d total %.1fs",
+        len(flags), len(unpaired_a), len(unpaired_b),
+        time.time() - pipeline_t0,
+    )
 
     return ReviewResult(
         flags=flags,

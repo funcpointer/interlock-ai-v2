@@ -120,7 +120,7 @@ def test_classify_docs_false_is_bit_identical_to_v1() -> None:
         use_llm_reranker=False,
         use_entity_grounding=False,
     )
-    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    expected_params = {"Transformer Impedance", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
     assert expected_params.issubset(surfaced), (
         f"Track 1 invariant broken: expected {expected_params}, got {surfaced}"
@@ -195,7 +195,7 @@ def test_snapshot_equivalence_use_llm_extraction_false() -> None:
         use_llm_reranker=False,
         use_entity_grounding=False,
     )
-    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    expected_params = {"Transformer Impedance", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
     assert expected_params.issubset(surfaced), (
         f"Track 1 invariant broken: expected {expected_params}, got {surfaced}"
@@ -303,7 +303,7 @@ def test_use_llm_reranker_false_is_bit_identical_to_v2_2(mocker) -> None:  # typ
         use_entity_grounding=False,
     )
     assert spy.call_count == 0
-    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    expected_params = {"Transformer Impedance", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
     assert expected_params.issubset(surfaced)
     for f in result.flags:
@@ -325,7 +325,7 @@ def test_use_llm_reranker_true_unanimous_approve_preserves_flags(mocker) -> None
         use_llm_reranker=True,
         use_entity_grounding=False,
     )
-    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    expected_params = {"Transformer Impedance", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
     assert expected_params.issubset(surfaced)
 
@@ -402,7 +402,7 @@ def test_use_entity_grounding_false_preserves_v22_snapshot(mocker) -> None:  # t
         use_entity_grounding=False,
     )
     assert spy.call_count == 0
-    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    expected_params = {"Transformer Impedance", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
     assert expected_params.issubset(surfaced)
 
@@ -469,7 +469,7 @@ def test_detector_exception_falls_back_gracefully(mocker) -> None:  # type: igno
         use_entity_grounding=True,
     )
     assert isinstance(result.flags, list)
-    expected_params = {"%Z", "Fault Current", "Transformer Rating"}
+    expected_params = {"Transformer Impedance", "Fault Current", "Transformer Rating"}
     surfaced = {f.parameter for f in result.flags if f.confidence >= 0.6}
     assert expected_params.issubset(surfaced)
 
@@ -514,7 +514,8 @@ def test_project_id_none_uses_base_registry(mocker) -> None:  # type: ignore[no-
         use_entity_grounding=False,
         project_id=None,
     )
-    impedance_flags = [f for f in result.flags if "%Z" in f.parameter]
+    # v2.8.1: canonical name is "Transformer Impedance"
+    impedance_flags = [f for f in result.flags if "Impedance" in f.parameter]
     assert impedance_flags, "expected at least one %Z flag"
     cited_ids = {
         c.clause_id for f in impedance_flags for c in f.cited_clauses
@@ -539,7 +540,8 @@ def test_project_id_loads_override(mocker) -> None:  # type: ignore[no-untyped-d
         use_entity_grounding=False,
         project_id="testproj",
     )
-    impedance_flags = [f for f in result.flags if "%Z" in f.parameter]
+    # v2.8.1: canonical name is "Transformer Impedance"
+    impedance_flags = [f for f in result.flags if "Impedance" in f.parameter]
     assert impedance_flags
     # Override entry has source_name starting with "TESTPROJ override"
     override_present = any(

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from interlock.extract.parameters import ParameterRecord
+from interlock.extract.parameters import ParameterRecord, canonicalize_param_name
 from interlock.extract.units import normalize_quantity
 
 
@@ -82,7 +82,7 @@ def _claim_to_parameter_record(
         bbox=(0.0, 0.0, 0.0, 0.0),
         section=None,
         span_text=c.span_text,
-        name=c.parameter_name,
+        name=canonicalize_param_name(c.parameter_name),  # v2.8.1
         raw_value=raw,
         normalized_magnitude=mag,
         normalized_unit=unit,

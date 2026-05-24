@@ -27,7 +27,7 @@ import fitz
 from anthropic import Anthropic
 
 from interlock.cache import disk as disk_cache
-from interlock.extract.parameters import ParameterRecord
+from interlock.extract.parameters import ParameterRecord, canonicalize_param_name
 from interlock.llm_pipeline.schemas.vision_claim import VisionClaim, VisionPageResult
 
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ def _claim_to_record(
         bbox=(0.0, 0.0, 0.0, 0.0),
         section=None,
         span_text=claim.visual_evidence,
-        name=claim.parameter_name,
+        name=canonicalize_param_name(claim.parameter_name),  # v2.8.1
         raw_value=claim.raw_value,
         normalized_magnitude=None,
         normalized_unit=None,

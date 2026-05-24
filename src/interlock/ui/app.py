@@ -39,7 +39,13 @@ from interlock.detect.coupled import (  # noqa: E402
 )
 from interlock.extract.parameters import extract_parameters  # noqa: E402
 from interlock.ingest.pdf import ingest  # noqa: E402
+from interlock.logging_config import configure_logging  # noqa: E402
 from interlock.pipeline import review_two_documents_full  # noqa: E402
+
+# v2.8.1 — install stderr log handler on the interlock.* tree. Default
+# level INFO; raise via ``INTERLOCK_LOG_LEVEL=DEBUG`` env var when
+# triaging a specific run. Idempotent across Streamlit reruns.
+configure_logging()
 
 
 # ----------------------------------------------------------------------

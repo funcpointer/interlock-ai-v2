@@ -10,12 +10,15 @@ for records that exact-name + positional matching could not pair.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable
 
 from interlock.align.exact import AlignedPair
 from interlock.extract.parameters import ParameterRecord
 from interlock.extract.units import equivalent, same_dimension
+
+logger = logging.getLogger(__name__)
 
 EmbedFn = Callable[[list[str]], dict[str, list[float]]]
 
@@ -32,6 +35,8 @@ _CANONICAL: dict[str, str] = {
     "Impedance": "transformer impedance percent",
     "Rated Impedance": "transformer impedance percent",
     "Per Unit Impedance": "transformer impedance percent",
+    # v2.8.1 — UI-canonical name bridge (matches canonicalize_param_name)
+    "Transformer Impedance": "transformer impedance percent",
     # Rated power family
     "Transformer Rating": "transformer rated apparent power kVA",
     "Rated Power": "transformer rated apparent power kVA",
@@ -133,6 +138,11 @@ def align_semantic(
             if sim > best_sim:
                 best_sim, best_rb = sim, rb
         if best_rb is not None and best_sim >= threshold:
+            logger.debug(
+                "align_semantic: %s/p%d %r ↔ %s/p%d %r sim=%.3f",
+                ra.doc_id, ra.page, ra.name, best_rb.doc_id, best_rb.page,
+                best_rb.name, best_sim,
+            )
             out.append(
                 AlignedPair(
                     a=ra,
@@ -146,4 +156,9 @@ def align_semantic(
                     pairing_confidence=best_sim,
                 )
             )
+    logger.debug(
+        "align_semantic: %d pairs emitted (threshold=%.2f, same_page_only=%s) "
+        "from |A|=%d |B|=%d",
+        len(out), threshold, same_page_only, len(a), len(b),
+    )
     return out

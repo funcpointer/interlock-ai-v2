@@ -14,32 +14,75 @@ dataclasses.replace).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 
 from interlock.extract.parameters import ParameterRecord
 from interlock.llm_pipeline.schemas.entity import DetectedEntity
 
+logger = logging.getLogger(__name__)
+
 
 def bind_records_to_entities(
     records: list[ParameterRecord],
     entities_by_page: dict[int, list[DetectedEntity]],
+    *,
+    diagram_pages: set[int] | None = None,
 ) -> list[ParameterRecord]:
-    """Return new records with entity_tag populated by y-binding."""
+    """Return new records with entity_tag populated by y-binding.
+
+    v2.8.1 — ``diagram_pages`` (optional set of 1-indexed page numbers)
+    skips binding for any record on a diagram page. On diagram pages
+    (TCC plots, one-lines, P&IDs) the vision lane already supplies
+    correct (entity, value) tuples; running y-binding on top of that
+    re-introduces the draw-order-y vs visual-y coord-space bug that the
+    Sprint 8 hotfix called out (e.g. binding a transformer ``%Z`` value
+    to an unrelated fuse model that happens to enclose its text-layer
+    y_center on the diagram).
+    """
+    diagram_pages = diagram_pages or set()
     out: list[ParameterRecord] = []
+    skipped_diagram = 0
+    skipped_already_tagged = 0
+    skipped_no_entities = 0
+    skipped_no_enclosure = 0
+    bound = 0
     for rec in records:
+        if rec.page in diagram_pages:
+            # Skip binding entirely. Vision lane is the authority on
+            # diagram pages; non-vision records keep their original tag
+            # (typically empty for Track 1 regex, populated by Track 2 LLM).
+            out.append(rec)
+            skipped_diagram += 1
+            continue
         if rec.entity_tag:
             out.append(rec)
+            skipped_already_tagged += 1
             continue
         page_ents = entities_by_page.get(rec.page, [])
         if not page_ents:
             out.append(rec)
+            skipped_no_entities += 1
             continue
         y_center = (rec.bbox[1] + rec.bbox[3]) / 2.0
         chosen = _pick_entity(y_center, page_ents)
         if chosen is None:
             out.append(rec)
+            skipped_no_enclosure += 1
             continue
+        logger.debug(
+            "entity_bind: %s p%d %r → %s (y_center=%.1f, %d candidates)",
+            rec.doc_id, rec.page, rec.raw_value, chosen.label,
+            y_center, len(page_ents),
+        )
         out.append(replace(rec, entity_tag=chosen.label))
+        bound += 1
+    logger.debug(
+        "entity_bind summary: %d bound, skipped (diagram=%d already_tagged=%d "
+        "no_entities=%d no_enclosure=%d), %d total records",
+        bound, skipped_diagram, skipped_already_tagged,
+        skipped_no_entities, skipped_no_enclosure, len(records),
+    )
     return out
 
 

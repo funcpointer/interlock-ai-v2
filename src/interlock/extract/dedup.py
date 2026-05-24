@@ -1,0 +1,162 @@
+"""v2.8.1 — cross-lane same-doc record dedup.
+
+Track 1 regex, Track 2 LLM-text, and Sprint 8 vision lane can all extract
+the same physical parameter from the same document. Without dedup they
+generate parallel pairs at alignment time, surfacing the same anomaly
+multiple times in the UI (one ``%Z``-name flag, one ``Transformer Impedance``
+flag — both about the same value).
+
+Strategy: within each document, collapse records that describe the same
+``(canonical_name, normalized_magnitude ± epsilon, page-window)``. When a
+collision is found, keep ONE record by lane priority:
+
+    vision > llm_text > regex
+
+Rationale for priority:
+- ``vision`` returns (entity, value) tuples extracted from the page image,
+  so the entity binding is reliable on diagram pages.
+- ``llm_text`` understands prose / table layouts the regex doesn't and
+  often carries a cleaner entity_tag from the LLM's full-page reading.
+- ``regex`` is deterministic but blind to context; useful as the floor.
+
+Out of scope: cross-document dedup, fuzzy-name matching (handled by the
+semantic aligner downstream), or unit conversion (records here are
+already Pint-normalized).
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+from collections.abc import Iterable
+
+from interlock.extract.parameters import ParameterRecord
+
+logger = logging.getLogger(__name__)
+
+# Lane priority: smaller = higher priority (kept on collision).
+_LANE_PRIORITY: dict[str, int] = {
+    "vision": 0,
+    "llm_text": 1,
+    "regex": 2,
+}
+
+# How far apart (in pages) two records can be and still count as the
+# "same" value. Coordination-study reissues sometimes shift the table
+# from p7 to p8 between revisions; a tight window avoids merging
+# legitimately separate readings on different pages of the same doc.
+_PAGE_WINDOW = 2
+
+# Magnitude equality tolerance (relative). 0.1% covers Pint precision +
+# typical PDF text-extraction noise without merging distinct values.
+_MAGNITUDE_RTOL = 1e-3
+
+
+def dedup_same_doc_records(
+    records: list[ParameterRecord],
+) -> list[ParameterRecord]:
+    """Collapse cross-lane duplicates within each document.
+
+    Cross-document records are NEVER merged — the aligner handles that
+    with its own machinery. Returns a NEW list; input is not mutated.
+    """
+    by_doc: dict[str, list[ParameterRecord]] = {}
+    for r in records:
+        by_doc.setdefault(r.doc_id, []).append(r)
+
+    out: list[ParameterRecord] = []
+    total_dropped = 0
+    for doc_id, recs in by_doc.items():
+        kept, dropped = _dedup_one_doc(recs)
+        out.extend(kept)
+        total_dropped += dropped
+        if dropped:
+            logger.info(
+                "dedup %s: %d in -> %d out (dropped %d cross-lane duplicates)",
+                doc_id, len(recs), len(kept), dropped,
+            )
+    if total_dropped == 0:
+        logger.info("dedup: no cross-lane duplicates across %d records", len(records))
+    return out
+
+
+def _dedup_one_doc(
+    records: list[ParameterRecord],
+) -> tuple[list[ParameterRecord], int]:
+    """Per-document dedup pass. Returns (kept, dropped_count)."""
+    # Sort by lane priority so the highest-priority record is processed
+    # first for each (name, magnitude) cluster.
+    indexed = sorted(
+        enumerate(records),
+        key=lambda pair: _LANE_PRIORITY.get(pair[1].extraction_lane, 99),
+    )
+    kept_keys: list[tuple[ParameterRecord, list[int]]] = []
+    drop_idx: set[int] = set()
+
+    for idx, rec in indexed:
+        merged = False
+        for kept_rec, kept_pages in kept_keys:
+            if _is_duplicate(rec, kept_rec, kept_pages):
+                # Lower-priority duplicate of an already-kept record.
+                drop_idx.add(idx)
+                kept_pages.append(rec.page)
+                merged = True
+                break
+        if not merged:
+            kept_keys.append((rec, [rec.page]))
+
+    kept = [r for i, r in enumerate(records) if i not in drop_idx]
+    return kept, len(drop_idx)
+
+
+def _is_duplicate(
+    candidate: ParameterRecord,
+    kept: ParameterRecord,
+    kept_pages: Iterable[int],
+) -> bool:
+    """v2.8.1 — Dedup intentionally restricted to CROSS-LANE collisions.
+
+    Same-lane same-name records are legitimate multiple readings of the
+    parameter at different physical locations in the document (e.g. the
+    Track 1 regex matches ``1000KVA XFMR`` once per TCC plot referencing
+    it). Merging those would silently shrink the record set the aligner
+    sees and break same-page pairing on later pages.
+
+    Cross-lane records, by contrast, are the same physical parameter
+    re-extracted by a different pipeline lane (regex / llm_text / vision)
+    — that's the duplication this dedup exists to collapse.
+    """
+    if candidate.extraction_lane == kept.extraction_lane:
+        return False
+    if candidate.name != kept.name:
+        return False
+    if not any(
+        abs(candidate.page - p) <= _PAGE_WINDOW for p in kept_pages
+    ):
+        return False
+    return _magnitudes_match(candidate, kept)
+
+
+def _magnitudes_match(a: ParameterRecord, b: ParameterRecord) -> bool:
+    """Return True when two records describe the same value.
+
+    Numeric path: both have ``normalized_magnitude`` set → compare with
+    relative tolerance ``_MAGNITUDE_RTOL``. Same unit required when both
+    set.
+
+    String path: at least one record lacks numeric normalization (common
+    for string-valued params like ``Fuse Designation``) → fall back to
+    case-insensitive raw_value equality.
+    """
+    am = a.normalized_magnitude
+    bm = b.normalized_magnitude
+    if am is not None and bm is not None:
+        if a.normalized_unit and b.normalized_unit and a.normalized_unit != b.normalized_unit:
+            return False
+        if am == 0 and bm == 0:
+            return True
+        return math.isclose(am, bm, rel_tol=_MAGNITUDE_RTOL, abs_tol=0.0)
+    # String path.
+    av = (a.raw_value or "").strip().lower()
+    bv = (b.raw_value or "").strip().lower()
+    return av == bv and av != ""

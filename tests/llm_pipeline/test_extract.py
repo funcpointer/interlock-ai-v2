@@ -136,7 +136,8 @@ def test_extract_claims_from_doc_returns_parameter_records(mocker) -> None:  # t
     records = extract_claims_from_doc(DOC_A, DocClass.coordination_study)
     assert all(r.provenance == "llm" for r in records)
     assert len(records) >= 1
-    impedance_records = [r for r in records if r.name == "%Z"]
+    # v2.8.1: canonicalize_param_name maps "%Z" → "Transformer Impedance"
+    impedance_records = [r for r in records if r.name == "Transformer Impedance"]
     assert impedance_records
 
 

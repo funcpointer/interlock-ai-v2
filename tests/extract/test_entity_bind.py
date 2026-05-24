@@ -113,3 +113,40 @@ def test_returns_new_records_does_not_mutate() -> None:
     out = bind_records_to_entities([rec], ents)
     assert rec.entity_tag == ""
     assert out[0].entity_tag == "XFMR-001"
+
+
+def test_diagram_pages_skip_binding() -> None:
+    """v2.8.1 — records on diagram pages must skip the y-enclosure binding.
+    The vision lane is the authority on diagram pages; running y-binding
+    on top re-introduces the draw-order-y vs visual-y coord-space bug
+    (e.g. binding a transformer %Z value to an enclosing fuse entity)."""
+    from interlock.extract.entity_bind import bind_records_to_entities
+    # Record on page 8 (diagram) with empty tag would otherwise bind to the
+    # enclosing entity "KRP-C1600SP" — the exact failure mode seen on
+    # doc_a_60pct p8.
+    rec = _record(page=8, y_top=100, y_bottom=110)
+    ents = {8: [_entity("KRP-C1600SP", y_top=80, y_bottom=130, page=8)]}
+    out = bind_records_to_entities([rec], ents, diagram_pages={8})
+    assert out[0].entity_tag == "", (
+        "diagram-page record must skip binding; expected empty tag, "
+        f"got {out[0].entity_tag!r}"
+    )
+
+
+def test_diagram_pages_preserves_existing_tag() -> None:
+    """v2.8.1 — diagram-page skip must NOT clear an already-set entity_tag
+    (e.g. one populated by the vision lane)."""
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record(page=8, entity_tag="LPS-RK-400SP")
+    ents = {8: [_entity("KRP-C1600SP", y_top=0, y_bottom=200, page=8)]}
+    out = bind_records_to_entities([rec], ents, diagram_pages={8})
+    assert out[0].entity_tag == "LPS-RK-400SP"
+
+
+def test_diagram_pages_non_listed_page_still_binds() -> None:
+    """v2.8.1 — only pages in diagram_pages are skipped; others bind."""
+    from interlock.extract.entity_bind import bind_records_to_entities
+    rec = _record(page=2, y_top=100, y_bottom=110)
+    ents = {2: [_entity("XFMR-001", y_top=80, y_bottom=130, page=2)]}
+    out = bind_records_to_entities([rec], ents, diagram_pages={8})
+    assert out[0].entity_tag == "XFMR-001"

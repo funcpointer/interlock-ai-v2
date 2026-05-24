@@ -21,6 +21,51 @@ from typing import Literal, NamedTuple
 from interlock.extract.units import normalize_quantity
 from interlock.ingest.text import Span
 
+# v2.8.1 — canonical parameter-name aliases. Track 1 regex emits short
+# names ("%Z", "IFLA"); Track 2 LLM-text emits prose names ("Transformer
+# Impedance", "Full Load Amperes"); vision lane emits its own. Alias map
+# collapses synonyms so cross-lane dedup + alignment treat them as one
+# canonical parameter. Keys lowercased + stripped; right side is the
+# canonical display form.
+_PARAM_NAME_ALIASES: dict[str, str] = {
+    # Impedance percent
+    "%z": "Transformer Impedance",
+    "z%": "Transformer Impedance",
+    "impedance": "Transformer Impedance",
+    "impedance %": "Transformer Impedance",
+    "transformer impedance": "Transformer Impedance",
+    "transformer impedance %": "Transformer Impedance",
+    # Full-load amperes
+    "ifla": "Full Load Amperes",
+    "fla": "Full Load Amperes",
+    "full load amperes": "Full Load Amperes",
+    "full-load amperes": "Full Load Amperes",
+    "full load current": "Full Load Amperes",
+    # Fault current
+    "fault current": "Fault Current",
+    "short-circuit current": "Fault Current",
+    "short circuit current": "Fault Current",
+    # Transformer rating
+    "transformer rating": "Transformer Rating",
+    "kva rating": "Transformer Rating",
+    "rated power": "Transformer Rating",
+    # System voltage
+    "system voltage": "System Voltage",
+    "voltage": "System Voltage",
+    "nominal voltage": "System Voltage",
+    "rated voltage": "System Voltage",
+    # Fuse designation (already exact match across lanes most of the time)
+    "fuse designation": "Fuse Designation",
+    "fuse part number": "Fuse Designation",
+}
+
+
+def canonicalize_param_name(name: str) -> str:
+    """Map a raw parameter name to its canonical form. Pass-through when
+    no alias exists so unknown names survive unchanged."""
+    key = (name or "").strip().lower()
+    return _PARAM_NAME_ALIASES.get(key, name)
+
 
 @dataclass(frozen=True)
 class ParameterRecord:
@@ -195,7 +240,7 @@ def extract_parameters(
                         bbox=span.bbox,
                         section=section_by_span.get(id(span)),
                         span_text=span.text,
-                        name=pat.name,
+                        name=canonicalize_param_name(pat.name),  # v2.8.1
                         raw_value=raw_value,
                         normalized_magnitude=mag,
                         normalized_unit=unit,
@@ -221,7 +266,7 @@ def extract_parameters(
                     bbox=span.bbox,
                     section=section_by_span.get(id(span)),
                     span_text=span.text,
-                    name=name,
+                    name=canonicalize_param_name(name),  # v2.8.1
                     raw_value=raw_value,
                     normalized_magnitude=mag,
                     normalized_unit=unit,

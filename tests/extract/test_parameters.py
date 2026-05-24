@@ -9,7 +9,8 @@ def _s(text: str, page: int = 1, y: float = 0) -> Span:
 def test_extract_impedance_percent() -> None:
     spans = [_s("5.75%Z, liquid")]
     records = extract_parameters(spans)
-    assert any(r.name == "%Z" and "5.75" in r.raw_value for r in records)
+    # v2.8.1: canonicalize_param_name maps "%Z" → "Transformer Impedance"
+    assert any(r.name == "Transformer Impedance" and "5.75" in r.raw_value for r in records)
 
 
 def test_extract_transformer_rating_kva() -> None:
@@ -59,7 +60,8 @@ def test_extract_ignores_non_parameter_text() -> None:
 def test_extract_handles_ifla() -> None:
     spans = [_s("IFLA=42A")]
     records = extract_parameters(spans)
-    target = [r for r in records if r.name == "IFLA"]
+    # v2.8.1: canonicalize_param_name maps "IFLA" → "Full Load Amperes"
+    target = [r for r in records if r.name == "Full Load Amperes"]
     assert target
     assert abs(target[0].normalized_magnitude - 42) < 1
 
@@ -127,7 +129,8 @@ def test_entity_tag_does_not_misfire_on_value_starting_with_digit() -> None:
     the marker, so this must NOT capture ``5`` as the tag."""
     spans = [_s("5.75%Z, liquid")]
     records = extract_parameters(spans)
-    target = [r for r in records if r.name == "%Z"]
+    # v2.8.1: %Z canonicalized to Transformer Impedance
+    target = [r for r in records if r.name == "Transformer Impedance"]
     assert target
     assert target[0].entity_tag == ""
 

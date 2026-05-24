@@ -106,7 +106,8 @@ def test_downcast_claim_to_parameter_record() -> None:
     assert record.page == 3
     assert record.bbox == (0.0, 0.0, 0.0, 0.0)
     assert record.span_text.startswith("⑥")
-    assert record.name == "%Z"
+    # v2.8.1: canonicalize_param_name maps "%Z" → "Transformer Impedance"
+    assert record.name == "Transformer Impedance"
     assert record.raw_value == "5.75 %"
     assert record.normalized_magnitude is not None  # Pint applied
 
