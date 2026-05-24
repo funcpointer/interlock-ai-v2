@@ -55,10 +55,20 @@ def _is_row_marker_tag(tag: str) -> bool:
     return bool(_ROW_MARKER_RE.match((tag or "").strip()))
 
 # How far apart (in pages) two records can be and still count as the
-# "same" value. Coordination-study reissues sometimes shift the table
-# from p7 to p8 between revisions; a tight window avoids merging
-# legitimately separate readings on different pages of the same doc.
-_PAGE_WINDOW = 2
+# "same" value within ONE doc. v2.8.8 — tightened from 2 to 0 (same
+# page only). The previous ±2 window was conflating physically
+# different equipment that happens to share a value across pages — e.g.
+# doc_a Transformer Rating '1000 kVA' appears on TCC1 p3, TCC2 p5, and
+# TCC3 p7 with row-marker tags '1', '1', '1' — three DIFFERENT
+# transformer slots referenced in three different coordination
+# studies, sharing only the kVA rating. With window=2 the regex p7
+# 1000kVA record got cross-lane-deduped against the vision p6 1000kVA
+# record (page distance 1), blocking TP-3 from surfacing.
+#
+# Within-doc dedup is now strictly same-page. Cross-document
+# "value-shifted-by-page-in-revision" is handled separately by
+# alignment, not by dedup.
+_PAGE_WINDOW = 0
 
 # Magnitude equality tolerance (relative). 0.1% covers Pint precision +
 # typical PDF text-extraction noise without merging distinct values.

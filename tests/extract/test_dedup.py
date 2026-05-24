@@ -29,9 +29,9 @@ def _rec(
 
 def test_dedup_keeps_vision_over_llm_text() -> None:
     """When vision + llm_text record the same value in the same doc on
-    nearby pages, vision wins."""
+    the SAME page, vision wins. v2.8.8 — same-page only dedup."""
     r1 = _rec(page=7, extraction_lane="llm_text", entity_tag="150 KVA XFMR")
-    r2 = _rec(page=8, extraction_lane="vision", entity_tag="XFMR-DRY-150")
+    r2 = _rec(page=7, extraction_lane="vision", entity_tag="XFMR-DRY-150")
     out = dedup_same_doc_records([r1, r2])
     lanes = [r.extraction_lane for r in out]
     assert lanes == ["vision"], (
@@ -40,20 +40,42 @@ def test_dedup_keeps_vision_over_llm_text() -> None:
 
 
 def test_dedup_keeps_llm_text_over_regex() -> None:
-    r1 = _rec(page=8, extraction_lane="regex", entity_tag="")
+    """v2.8.8 — same-page only dedup."""
+    r1 = _rec(page=7, extraction_lane="regex", entity_tag="")
     r2 = _rec(page=7, extraction_lane="llm_text", entity_tag="150 KVA XFMR")
     out = dedup_same_doc_records([r1, r2])
     assert [r.extraction_lane for r in out] == ["llm_text"]
 
 
 def test_dedup_keeps_vision_over_both_others() -> None:
-    """Full 3-lane collision — vision wins."""
+    """Full 3-lane collision on the SAME page — vision wins.
+    v2.8.8 — same-page only dedup."""
     r_regex = _rec(page=8, extraction_lane="regex")
-    r_llm = _rec(page=7, extraction_lane="llm_text")
+    r_llm = _rec(page=8, extraction_lane="llm_text")
     r_vision = _rec(page=8, extraction_lane="vision")
     out = dedup_same_doc_records([r_regex, r_llm, r_vision])
     assert len(out) == 1
     assert out[0].extraction_lane == "vision"
+
+
+def test_dedup_does_not_merge_across_pages_v2_8_8() -> None:
+    """v2.8.8 — same-value records on DIFFERENT pages are NOT duplicates.
+    Coordination-study docs reference '1000 kVA' transformer rating from
+    multiple TCC tables (p3 TCC1, p5 TCC2, p7 TCC3). These are physically
+    the same transformer but each table-row record is a distinct
+    positional reference. Previous ±2 page-window was conflating them
+    cross-lane and dropping the regex-extracted row-marker-tagged
+    records (TP-3 blocker)."""
+    r_regex_p7 = _rec(
+        page=7, mag=1_000_000.0, unit="kilovolt_ampere",
+        raw="1000 kVA", extraction_lane="regex", entity_tag="1",
+    )
+    r_vision_p6 = _rec(
+        page=6, mag=1_000_000.0, unit="kilovolt_ampere",
+        raw="1000KVA", extraction_lane="vision", entity_tag="1000KVA",
+    )
+    out = dedup_same_doc_records([r_regex_p7, r_vision_p6])
+    assert len(out) == 2, "different pages must NOT dedup"
 
 
 def test_dedup_does_not_merge_across_documents() -> None:
