@@ -84,18 +84,24 @@ def vision_extract_page(
                 tag, exc,
             )
             return []
-        # Hallucination guard: each claim's entity_id must be a substring
-        # of the page text (case-insensitive). Drops invented IDs.
-        page_text_lower = page_text.lower()
+        # Hallucination guard: entity_id must be grounded in the page
+        # text. Two-tier check:
+        #   1. Whitespace-normalized substring match (handles line-broken
+        #      compound IDs like "1000KVA 480/277V" where the page text
+        #      has "1000KVA\n480/277V").
+        #   2. Per-word fallback — every word in entity_id must appear
+        #      somewhere in the page text. Catches compound descriptors
+        #      whose word order differs from page layout while still
+        #      rejecting pure inventions ("HALLUCINATED-XYZ" survives
+        #      neither test).
         kept = [
-            c for c in wrapped.claims
-            if c.entity_id.lower() in page_text_lower
+            c for c in wrapped.claims if _entity_grounded(c.entity_id, page_text)
         ]
         dropped = len(wrapped.claims) - len(kept)
         if dropped:
             dropped_ids = [
                 c.entity_id for c in wrapped.claims
-                if c.entity_id.lower() not in page_text_lower
+                if not _entity_grounded(c.entity_id, page_text)
             ]
             logger.warning(
                 "vision-lane %s hallucination guard dropped %d/%d claims (ids=%s)",
@@ -193,6 +199,35 @@ def _response_text(resp: object) -> str:
 
 _FENCED_JSON = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 _BARE_JSON = re.compile(r"(\{.*\})", re.DOTALL)
+_WHITESPACE = re.compile(r"\s+")
+_TOKEN = re.compile(r"\w[\w./\\\-]*")
+
+
+def _entity_grounded(entity_id: str, page_text: str) -> bool:
+    """Return True when entity_id is plausibly anchored to page text.
+
+    Step 1 (cheap): whitespace-collapsed substring match. ``1000KVA
+    480/277V`` matches a page with ``1000KVA\\n480/277V`` because both
+    sides collapse to ``1000kva 480/277v``.
+
+    Step 2 (fallback): every \\w-token in entity_id must appear in the
+    page text. Lets the model emit compound descriptors whose token
+    order differs from page layout while still rejecting pure
+    inventions (``HALLUCINATED-XYZ`` has no token match).
+    """
+    if not entity_id:
+        return False
+    eid = entity_id.lower()
+    page_lower = page_text.lower()
+    eid_collapsed = _WHITESPACE.sub(" ", eid).strip()
+    page_collapsed = _WHITESPACE.sub(" ", page_lower)
+    if eid_collapsed in page_collapsed:
+        return True
+    # Per-word fallback — every meaningful token must show up somewhere.
+    tokens = [t.group(0) for t in _TOKEN.finditer(eid)]
+    if not tokens:
+        return False
+    return all(t in page_collapsed for t in tokens)
 
 
 def _parse_json(raw: str) -> dict[str, Any] | None:

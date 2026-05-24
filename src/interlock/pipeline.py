@@ -33,6 +33,35 @@ from interlock.store import sqlite as store
 logger = logging.getLogger(__name__)
 
 
+def _log_record_tally(
+    side: str, doc_id: str, records: list[ParameterRecord],
+) -> None:
+    """DEBUG-only: per-(parameter, page, lane) tally of extracted records.
+
+    Output shape (one line per parameter)::
+
+        records A doc_a 'Transformer Impedance': 4
+          [p2 vision] 5.75 % (XFMR-001) [p3 regex] 5.75 % () ...
+
+    Use when diagnosing "why didn't TP-N surface": shows whether the
+    mutated value was actually extracted, by which lane, on which page.
+    """
+    by_name: dict[str, list[ParameterRecord]] = {}
+    for r in records:
+        by_name.setdefault(r.name, []).append(r)
+    for name in sorted(by_name):
+        recs = by_name[name]
+        details = " ".join(
+            f"[p{r.page} {r.extraction_lane}] {r.raw_value!r}"
+            f"{(' (' + r.entity_tag + ')') if r.entity_tag else ''}"
+            for r in recs
+        )
+        logger.debug(
+            "records %s %s %r: %d  %s",
+            side, doc_id, name, len(recs), details,
+        )
+
+
 @dataclass(frozen=True)
 class ReviewResult:
     """Rich pipeline output. ``flags`` is what the detector emitted; the
@@ -311,6 +340,12 @@ def review_two_documents_full(
     from interlock.extract.dedup import dedup_same_doc_records
     pa = dedup_same_doc_records(pa)
     pb = dedup_same_doc_records(pb)
+
+    # v2.8.1 — per-doc per-parameter tally at DEBUG so triage can see
+    # which params extracted from each doc and on which pages.
+    if logger.isEnabledFor(logging.DEBUG):
+        _log_record_tally("A", doc_a_id, pa)
+        _log_record_tally("B", doc_b_id, pb)
 
     # v2 Sprint 4.5: entity grounding. Runs AFTER Track 2 union-merge so
     # both Track 1 + Track 2 records get bound by the same detector pass.

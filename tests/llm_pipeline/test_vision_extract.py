@@ -261,3 +261,86 @@ def test_vision_extract_pdf_missing_returns_empty(monkeypatch, tmp_path) -> None
     from interlock.llm_pipeline.vision_extract import vision_extract_page
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     assert vision_extract_page(str(tmp_path / "missing.pdf"), 1, doc_id="d") == []
+
+
+def test_hallucination_guard_accepts_line_broken_compound_id(
+    mocker, monkeypatch, tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    """Vision often emits compound entity_ids like '1000KVA 480/277V'
+    that appear on the page split across line breaks. Whitespace-
+    normalized substring matching must accept those."""
+    from interlock.llm_pipeline.vision_extract import vision_extract_page
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # Page text has the tokens on separate lines (PyMuPDF reads diagram
+    # callouts in draw order, so multi-line is common).
+    pdf = _make_pdf(tmp_path, "Equipment list:\n1000KVA\n480/277V\nsome other text")
+    mocker.patch(
+        "interlock.llm_pipeline.vision_extract._call_claude_vision",
+        return_value=_fake_response({
+            "page": 1, "page_understanding": "x", "page_layout": "diagram",
+            "claims": [
+                {
+                    "entity_kind": "equipment", "entity_id": "1000KVA 480/277V",
+                    "entity_location_hint": "", "parameter_name": "Transformer Rating",
+                    "raw_value": "1000 kVA", "visual_evidence": "label below symbol",
+                },
+            ],
+        }),
+    )
+    out = vision_extract_page(str(pdf), 1, doc_id="d")
+    assert len(out) == 1, (
+        "expected compound entity_id to ground via whitespace-normalized check"
+    )
+    assert out[0].entity_tag == "1000KVA 480/277V"
+
+
+def test_hallucination_guard_per_word_fallback_accepts_reordered_tokens(
+    mocker, monkeypatch, tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    """When the model reorders tokens (e.g. emits '60HP 3Ø 7.7A FLA'
+    but the page shows '60HP 7.7A 3Ø FLA' elsewhere), per-word fallback
+    must accept it as long as every word appears on the page."""
+    from interlock.llm_pipeline.vision_extract import vision_extract_page
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    pdf = _make_pdf(tmp_path, "Motor data:\n60HP 7.7A 3Ø FLA cont duty")
+    mocker.patch(
+        "interlock.llm_pipeline.vision_extract._call_claude_vision",
+        return_value=_fake_response({
+            "page": 1, "page_understanding": "x", "page_layout": "diagram",
+            "claims": [
+                {
+                    "entity_kind": "equipment", "entity_id": "60HP 3Ø 7.7A FLA",
+                    "entity_location_hint": "", "parameter_name": "Motor Rating",
+                    "raw_value": "60 HP", "visual_evidence": "ms",
+                },
+            ],
+        }),
+    )
+    out = vision_extract_page(str(pdf), 1, doc_id="d")
+    assert len(out) == 1
+
+
+def test_hallucination_guard_still_rejects_pure_inventions(
+    mocker, monkeypatch, tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    """Pure inventions (no overlapping tokens with page text) must still
+    be dropped — the per-word fallback can't open the door wide enough
+    to let made-up labels through."""
+    from interlock.llm_pipeline.vision_extract import vision_extract_page
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    pdf = _make_pdf(tmp_path, "Only LPS-RK-100SP and KRP-C-1600SP on this page")
+    mocker.patch(
+        "interlock.llm_pipeline.vision_extract._call_claude_vision",
+        return_value=_fake_response({
+            "page": 1, "page_understanding": "x", "page_layout": "diagram",
+            "claims": [
+                {
+                    "entity_kind": "equipment", "entity_id": "ZYX-9999",
+                    "entity_location_hint": "", "parameter_name": "P",
+                    "raw_value": "V", "visual_evidence": "e",
+                },
+            ],
+        }),
+    )
+    out = vision_extract_page(str(pdf), 1, doc_id="d")
+    assert out == [], "pure invention must still be dropped"

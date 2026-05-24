@@ -81,6 +81,13 @@ def detect_flags(
     for p in pairs:
         if p.value_equivalent:
             skipped_equivalent += 1
+            logger.debug(
+                "detect: SUPPRESS equivalent %s A=%r p%d B=%r p%d "
+                "(name_conf=%.2f pairing_conf=%.2f)",
+                p.a.name, p.a.raw_value, p.a.page,
+                p.b.raw_value, p.b.page,
+                p.name_match_confidence, p.pairing_confidence,
+            )
             continue
         # If both magnitudes are present and numerically equal, suppress
         # (defensive: equivalent() should already have caught this).
@@ -90,6 +97,11 @@ def detect_flags(
             and p.a.normalized_magnitude == p.b.normalized_magnitude
         ):
             skipped_equivalent += 1
+            logger.debug(
+                "detect: SUPPRESS magnitudes-equal %s A=%r (%.6g) B=%r (%.6g)",
+                p.a.name, p.a.raw_value, p.a.normalized_magnitude,
+                p.b.raw_value, p.b.normalized_magnitude,
+            )
             continue
 
         # Classify severity via tolerance bands when both sides are numeric;
