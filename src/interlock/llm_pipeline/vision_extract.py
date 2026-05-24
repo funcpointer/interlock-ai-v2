@@ -176,10 +176,27 @@ def _parse_json(raw: str) -> dict[str, Any] | None:
 
 
 def _cache_payload(pdf_path: str, page: int, page_text: str) -> dict[str, Any]:
+    """Cache key for vision lane. Aligned with page-structure cache:
+    resolve() + size + mtime catches in-place PDF replace; page_text_hash
+    is an additional signal (cheap belt-and-suspenders)."""
+    p = Path(pdf_path)
+    try:
+        resolved = str(p.resolve())
+    except Exception:
+        resolved = pdf_path
+    try:
+        stat = p.stat()
+        size = stat.st_size
+        mtime = int(stat.st_mtime)
+    except Exception:
+        size = 0
+        mtime = 0
     return {
         "model": MODEL,
         "prompt_version": PROMPT_VERSION,
         "page": page,
         "page_text_hash": hashlib.sha256(page_text.encode("utf-8")).hexdigest()[:32],
-        "pdf_path": pdf_path,
+        "pdf_path": resolved,
+        "size": size,
+        "mtime": mtime,
     }

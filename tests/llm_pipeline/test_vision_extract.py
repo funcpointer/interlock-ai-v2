@@ -162,6 +162,61 @@ def test_vision_extract_diskcache_hit(mocker, monkeypatch, tmp_path) -> None:  #
     assert spy.call_count == 1
 
 
+def test_vision_extract_diskcache_resolves_path(mocker, monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Sprint 8 cache audit — different paths to the same file (e.g. with
+    './' prefix, symlink, or via relative cwd) must hit the same key.
+    Otherwise the second call re-invokes the Anthropic API."""
+    from interlock.llm_pipeline.vision_extract import vision_extract_page
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    pdf = _make_pdf(tmp_path, "ANCHOR-XYZ content")
+    spy = mocker.patch(
+        "interlock.llm_pipeline.vision_extract._call_claude_vision",
+        return_value=_fake_response({
+            "page": 1, "page_understanding": "x", "page_layout": "diagram",
+            "claims": [],
+        }),
+    )
+    # First call uses the canonical absolute path.
+    vision_extract_page(str(pdf), 1, doc_id="d")
+    assert spy.call_count == 1
+    # Second call uses a path that resolves to the same file (insert './'
+    # midway so the raw string differs but Path.resolve() collapses it).
+    aliased = str(pdf.parent) + "/./" + pdf.name
+    assert aliased != str(pdf)
+    vision_extract_page(aliased, 1, doc_id="d")
+    assert spy.call_count == 1, "expected cache hit via Path.resolve()"
+
+
+def test_vision_extract_diskcache_invalidates_on_pdf_replace(  # type: ignore[no-untyped-def]
+    mocker, monkeypatch, tmp_path,
+) -> None:
+    """Sprint 8 cache audit — replacing the PDF in place with new content
+    must invalidate the cache via size/mtime, even if the same path is
+    reused."""
+    import time as _time
+
+    from interlock.llm_pipeline.vision_extract import vision_extract_page
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    pdf = _make_pdf(tmp_path, "ORIGINAL CONTENT entity ALPHA-1")
+    spy = mocker.patch(
+        "interlock.llm_pipeline.vision_extract._call_claude_vision",
+        return_value=_fake_response({
+            "page": 1, "page_understanding": "x", "page_layout": "diagram",
+            "claims": [],
+        }),
+    )
+    vision_extract_page(str(pdf), 1, doc_id="d")
+    assert spy.call_count == 1
+    # Replace the PDF in place with materially different content.
+    # Sleep 1.1s so mtime tick is observable on filesystems with 1s mtime.
+    _time.sleep(1.1)
+    pdf.unlink()
+    pdf2 = _make_pdf(tmp_path, "REPLACED CONTENT entity OMEGA-9 with more text")
+    assert str(pdf2) == str(pdf)
+    vision_extract_page(str(pdf), 1, doc_id="d")
+    assert spy.call_count == 2, "expected cache miss after PDF replace"
+
+
 def test_vision_extract_sets_extraction_lane_vision(
     mocker, monkeypatch, tmp_path,
 ) -> None:  # type: ignore[no-untyped-def]
