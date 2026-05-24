@@ -198,59 +198,214 @@ def test_invariant_identity_anchors_not_in_parameters(entry: dict) -> None:
 
 
 # ----------------------------------------------------------------------
-# Tier 2 — xfail stubs (activate when Phase 33.1+ ships)
+# Tier 2 — schema-shape tests (Phase 33.1 active; broader contract
+# stays skipped until Phase 33.2/33.3/33.4 ship builders + matcher)
 # ----------------------------------------------------------------------
 #
-# Each attack gets one xfail test that asserts the inventory builder
-# + matcher produce the expected outcomes. Until
-# ``interlock.model.equipment`` exists, the stub xfails with the
-# Phase 33.1 reason.
-#
-# Once Phase 33.1 ships ``Equipment`` and the inventory builder, the
-# xfail removes itself naturally (importable module path) and the
-# assertion exercises the new code paths.
+# Phase 33.1 acceptance: Tier 2 no longer skips. Each attack gets
+# tests that exercise the typed schemas — gold YAML lifts cleanly
+# into Equipment instances, invariants enforced. Full inventory /
+# match / mutation behavior tests come in later phases.
 
 
-def _equipment_module_available() -> bool:
+from tests.fixtures.equipment.synthetic import (  # noqa: E402
+    attack,
+    to_equipment_a,
+    to_equipment_b,
+)
+
+
+@pytest.mark.parametrize("attack_name", attack_names())
+def test_attack_inventory_lifts_into_typed_equipment(attack_name: str) -> None:
+    """Phase 33.1 — every attack's expected_inventory_a/b dicts must
+    lift cleanly into ``Equipment`` instances. Side effects:
+
+    1. Equipment dataclass instantiates (no missing required fields,
+       no type errors in literals).
+    2. ``validate_equipment`` passes — all spec §2.1 invariants hold
+       on the gold itself. If the gold violates an invariant, the
+       lifter raises and this test fails — the gold IS the contract.
+    """
+    from interlock.model.equipment import Equipment
+
+    entry = attack(attack_name)
+    a_inv = to_equipment_a(entry)
+    b_inv = to_equipment_b(entry)
+
+    # Both sides return lists (possibly empty for matcher-only fixtures).
+    assert isinstance(a_inv, list)
+    assert isinstance(b_inv, list)
+    for eq in (*a_inv, *b_inv):
+        assert isinstance(eq, Equipment)
+        # canonical_id non-empty and a string
+        assert isinstance(eq.canonical_id, str) and eq.canonical_id
+        # kind is one of the allowed Literal values
+        assert eq.kind in (
+            "transformer", "fuse", "breaker", "cable", "relay", "other",
+        )
+        # cluster_status is in the allowed set
+        assert eq.cluster_status in (
+            "confident_cluster", "ambiguous_cluster",
+            "forbidden_cluster", "lane_conflict",
+        )
+
+
+@pytest.mark.parametrize("attack_name", attack_names())
+def test_attack_inventory_doc_id_matches_side(attack_name: str) -> None:
+    """Lifter sets ``doc_id`` from the side. Equipment from
+    ``to_equipment_a`` carry ``doc_id='doc_a'``; from
+    ``to_equipment_b``, ``doc_id='doc_b'``. Phase 33.4 matcher uses
+    this to refuse same-side pairs."""
+    entry = attack(attack_name)
+    for eq in to_equipment_a(entry):
+        assert eq.doc_id == "doc_a", (
+            f"{attack_name}: doc_a Equipment carries doc_id={eq.doc_id!r}"
+        )
+    for eq in to_equipment_b(entry):
+        assert eq.doc_id == "doc_b", (
+            f"{attack_name}: doc_b Equipment carries doc_id={eq.doc_id!r}"
+        )
+
+
+@pytest.mark.parametrize("attack_name", attack_names())
+def test_attack_inventory_invariants_pass_via_validator(attack_name: str) -> None:
+    """Spec §2.1 invariants are enforced by
+    ``model.equipment.validate_equipment``. Lifter already calls it,
+    so this test confirms the gold itself doesn't violate the
+    invariants — catches authoring drift if someone edits the gold
+    without re-running the structural tier."""
+    from interlock.model.equipment import validate_equipment
+
+    entry = attack(attack_name)
+    for eq in (*to_equipment_a(entry), *to_equipment_b(entry)):
+        # Should not raise. If it did, lifter would have already raised
+        # — this is the belt-and-suspenders check.
+        validate_equipment(eq)
+
+
+def test_phase_33_1_schemas_importable() -> None:
+    """Phase 33.1 ships ``interlock.model.equipment`` with the public
+    contract. Spec §10 acceptance: this import must succeed (then
+    Tier 2 tests unblock automatically)."""
+    from interlock.model.equipment import (
+        ClusterStatus,
+        ContextKind,
+        Equipment,
+        EquipmentKind,
+        EquipmentMatch,
+        EquipmentMention,
+        GroundingMode,
+        MatchStatus,
+        SourceLane,
+        validate_canonical_id_no_mutable_values,
+        validate_canonical_id_not_page_only,
+        validate_equipment,
+        validate_identity_anchors_not_in_parameters,
+    )
+
+    # Compile-time-ish: ensure the names exist and have the expected
+    # general shape. Runtime checks for Literal-typed values happen
+    # via the lifter tests above.
+    assert Equipment is not None
+    assert EquipmentMention is not None
+    assert EquipmentMatch is not None
+    # Literal aliases are themselves callable in type-system terms but
+    # at runtime they're just ``typing.Literal[...]`` — not callable.
+    # Just verify they exist as imported names.
+    _ = (EquipmentKind, SourceLane, ContextKind, GroundingMode)
+    _ = (ClusterStatus, MatchStatus)
+    _ = (
+        validate_canonical_id_no_mutable_values,
+        validate_canonical_id_not_page_only,
+        validate_equipment,
+        validate_identity_anchors_not_in_parameters,
+    )
+
+
+def test_validators_reject_known_bad_canonical_ids() -> None:
+    """Negative tests for the validators themselves — confirm they
+    actually trip on the patterns the spec forbids."""
+    from interlock.model.equipment import (
+        validate_canonical_id_no_mutable_values,
+        validate_canonical_id_not_page_only,
+        validate_identity_anchors_not_in_parameters,
+    )
+
+    # Mutable-value embedding — spec §2.1 invariant #2
+    with pytest.raises(ValueError, match="mutable value"):
+        validate_canonical_id_no_mutable_values("transformer:1000KVA")
+    with pytest.raises(ValueError, match="mutable value"):
+        validate_canonical_id_no_mutable_values("fuse:200A")
+
+    # Page-only — spec §2.1 invariant #3
+    with pytest.raises(ValueError, match="page-only"):
+        validate_canonical_id_not_page_only("transformer:p3")
+
+    # Anchor/parameter collision — spec §2.1 invariant #2
+    with pytest.raises(ValueError, match="immutable"):
+        validate_identity_anchors_not_in_parameters(
+            identity_anchors=("1000 kVA",),
+            parameters={"Transformer Rating": "1000 kVA"},
+        )
+
+    # Positive cases should NOT raise.
+    validate_canonical_id_no_mutable_values("transformer:tcc1:row_1")
+    validate_canonical_id_not_page_only("transformer:tcc1:row_1")
+    validate_identity_anchors_not_in_parameters(
+        identity_anchors=("tcc1", "row_1"),
+        parameters={"Transformer Rating": "1000 kVA"},
+    )
+
+
+# ----------------------------------------------------------------------
+# Tier 2 — full inventory + match + mutation contract tests
+# ----------------------------------------------------------------------
+# These remain SKIPPED until Phase 33.2+33.3+33.4 ship the inventory
+# builder, context extraction, and matcher. Phase 33.1 only certifies
+# the schemas + gold lifting.
+
+
+def _inventory_builder_available() -> bool:
     try:
-        import importlib  # noqa
-        importlib.import_module("interlock.model.equipment")
+        import importlib
+        importlib.import_module("interlock.extract.equipment_inventory")
         return True
     except ImportError:
         return False
 
 
-_PHASE_33_1_SHIPPED = _equipment_module_available()
+def _matcher_available() -> bool:
+    try:
+        import importlib
+        importlib.import_module("interlock.align.equipment_match")
+        return True
+    except ImportError:
+        return False
+
+
+_PHASE_33_2_SHIPPED = _inventory_builder_available()
+_PHASE_33_4_SHIPPED = _matcher_available()
 
 
 @pytest.mark.parametrize("attack_name", attack_names())
-def test_attack_satisfied_by_implementation(attack_name: str) -> None:
-    """One contract test per attack. Skipped until Phase 33.1 schemas
-    + Phase 33.2/33.3/33.4 builders + matcher exist. When implementation
-    lands, this test runs the synthetic_inputs through the real
-    pipeline and asserts the expected_* outcomes hold."""
-    if not _PHASE_33_1_SHIPPED:
+def test_attack_satisfied_by_pipeline(attack_name: str) -> None:
+    """Full pipeline contract test — runs the synthetic_inputs through
+    the real inventory builder + matcher and asserts every expected_*
+    outcome. Unblocks when Phase 33.2 (inventory) AND Phase 33.4
+    (matcher) ship. Phase 33.1 leaves this skipped."""
+    if not (_PHASE_33_2_SHIPPED and _PHASE_33_4_SHIPPED):
         pytest.skip(
-            f"attack {attack_name!r}: Phase 33.1 (interlock.model.equipment) "
-            "not yet shipped; structural-only validation runs in Tier 1 tests."
+            f"attack {attack_name!r}: "
+            f"inventory builder {'shipped' if _PHASE_33_2_SHIPPED else 'pending'}; "
+            f"matcher {'shipped' if _PHASE_33_4_SHIPPED else 'pending'}. "
+            "Phase 33.1 ships schemas only — tier-2 schema tests above "
+            "exercise the contract this phase delivers."
         )
-    # Phase 33.1+ implementation note: when this branch becomes active,
-    # the test body should:
-    #   1. Load attack entry via tests.fixtures.equipment.synthetic.attack(name)
-    #   2. Lift synthetic_inputs.doc_a/doc_b records into ParameterRecord
-    #      + Span objects via Phase 33.1 lifters
-    #   3. Call build_equipment_inventory(...) for each doc
-    #   4. Assert inventory matches expected_inventory_a / _b
-    #   5. Call match_equipment_across_docs(...)
-    #   6. Assert matched / unmatched / ambiguous / conflict states
-    #      match expected_matches / expected_no_match / expected_ambiguous
-    #   7. Assert no pair in expected_no_match surfaces as matched
-    #      (the forbidden-match gate from Attack 13)
-    #   8. Where expected_legacy_flags is present, derive flag list
-    #      from matches + mutations and diff against gold.
+    # Phase 33.2+33.4 implementation note: see Phase 33.0a docstring
+    # for the 8-step assertion plan once both modules import.
     pytest.fail(
-        "Phase 33.1+ implementation must replace this stub. "
-        "See module docstring for the 8-step assertion plan."
+        "Phase 33.2/33.4 implementation must replace this stub. See "
+        "test docstring above for the 8-step assertion plan."
     )
 
 

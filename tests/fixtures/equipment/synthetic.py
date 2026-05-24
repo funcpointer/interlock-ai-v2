@@ -15,9 +15,12 @@ will add ``to_equipment(...)`` adapters that lift them into typed
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from interlock.model.equipment import Equipment
 
 _GOLD_PATH = (
     Path(__file__).resolve().parents[3]
@@ -60,27 +63,57 @@ def global_invariants() -> list[dict[str, Any]]:
 
 
 # ----------------------------------------------------------------------
-# Adapter scaffolding for Phase 33.1+
+# Adapters into the Phase 33.1 typed schemas
 # ----------------------------------------------------------------------
-# Phase 33.1 will replace these stubs with real conversions into the
-# typed schemas. For now they raise NotImplementedError so any
-# accidental Phase 33.1 usage of these helpers fails loudly instead
-# of silently producing dict-shaped fakes.
+# These lifters convert the dict-shaped gold YAML into typed
+# ``Equipment`` instances from ``src/interlock/model/equipment.py``.
+# Phase 33.1 only wires the inventory side — match-side lifting (gold
+# ``expected_matches`` → ``EquipmentMatch``) lands in Phase 33.4 when
+# the matcher exists.
 
 
-def to_equipment_a(attack_entry: dict[str, Any]) -> list[Any]:
-    """Stub. Phase 33.1 will return ``list[Equipment]``."""
-    raise NotImplementedError(
-        "Phase 33.1 hook — typed Equipment schema not yet shipped. "
-        "Phase 33.0a tests assert on dict-shaped gold directly."
-    )
+def to_equipment_a(attack_entry: dict[str, Any]) -> list["Equipment"]:
+    """Lift gold ``expected_inventory_a`` into typed Equipment objects.
+
+    Returns an empty list when the attack declares no inventory
+    expectation (e.g. matcher-only fixtures). Each Equipment instance
+    is run through ``validate_equipment`` so any §2.1 invariant
+    violation in the gold itself trips the lifter loudly."""
+    return _lift_inventory(attack_entry, side="doc_a")
 
 
-def to_equipment_b(attack_entry: dict[str, Any]) -> list[Any]:
-    """Stub. Phase 33.1 will return ``list[Equipment]``."""
-    raise NotImplementedError(
-        "Phase 33.1 hook — typed Equipment schema not yet shipped."
-    )
+def to_equipment_b(attack_entry: dict[str, Any]) -> list["Equipment"]:
+    """Lift gold ``expected_inventory_b`` into typed Equipment objects."""
+    return _lift_inventory(attack_entry, side="doc_b")
+
+
+def _lift_inventory(attack_entry: dict[str, Any], side: str) -> list["Equipment"]:
+    from interlock.model.equipment import Equipment, validate_equipment
+
+    if side not in ("doc_a", "doc_b"):
+        raise ValueError(f"side must be 'doc_a' or 'doc_b', got {side!r}")
+
+    block_name = "expected_inventory_a" if side == "doc_a" else "expected_inventory_b"
+    entries = attack_entry.get(block_name, []) or []
+
+    out: list[Equipment] = []
+    for entry in entries:
+        eq = Equipment(
+            doc_id=side,
+            canonical_id=entry["canonical_id"],
+            kind=entry["kind"],
+            identity_anchors=tuple(entry.get("identity_anchors", []) or []),
+            weak_descriptors=tuple(entry.get("weak_descriptors", []) or []),
+            parameters=dict(entry.get("parameters", {}) or {}),
+            mentions=(),  # Phase 33.2 builder populates; gold doesn't enumerate
+            confidence=float(entry.get("confidence", entry.get("confidence_cap", 1.0))),
+            cluster_status=entry.get("cluster_status", "confident_cluster"),
+        )
+        validate_equipment(eq)
+        out.append(eq)
+    return out
+
+
 
 
 def to_synthetic_records(attack_entry: dict[str, Any], side: str) -> list[dict[str, Any]]:
