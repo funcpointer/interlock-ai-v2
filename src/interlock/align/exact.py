@@ -67,15 +67,35 @@ def _y_center(r: ParameterRecord) -> float:
 # -> "LPN-RK". Used to gate cross-family pairing of string-valued params.
 _FAMILY_RE = re.compile(r"^([A-Z][A-Z\-]*?)-?\d")
 
+# Sentinel returned when no real alphabetic-prefix family is present.
+# v2.8.5 — the previous fallback returned the full raw_value, which
+# meant any string-valued record with differing raw_value would fail the
+# family filter (e.g. Fault Current values like '20,000A RMS Sym' vs
+# '200,000A RMS Sym' — different strings, same parameter, legitimately
+# distinct magnitudes). Treat sentinel as "no family constraint" at
+# the filter site so those pairs can still match.
+_NO_FAMILY = "__NO_FAMILY__"
+
 
 def _string_family(raw_value: str) -> str:
-    """Return the alphabetic family prefix of a string-valued parameter.
+    """Return the alphabetic family prefix of a string-valued parameter,
+    or ``_NO_FAMILY`` if the raw_value has no fuse-style prefix shape.
 
-    Falls back to the full value when no leading prefix-then-digit shape is
-    present (so unrelated string params still self-match by equality).
+    Callers must skip the family-equality filter when EITHER side is
+    ``_NO_FAMILY`` — otherwise legitimate string-valued numeric params
+    (Fault Current, Inrush Current) get filtered out of the candidate
+    pool by raw-value inequality.
     """
     m = _FAMILY_RE.match(raw_value.strip())
-    return m.group(1) if m else raw_value.strip()
+    return m.group(1) if m else _NO_FAMILY
+
+
+def _family_compatible(a: str, b: str) -> bool:
+    """True when two records' string-families are compatible. ``_NO_FAMILY``
+    on either side is permissive (no constraint)."""
+    if a == _NO_FAMILY or b == _NO_FAMILY:
+        return True
+    return a == b
 
 
 def align_exact(
@@ -137,16 +157,24 @@ def align_exact(
             strict = [rb for rb in same_page if not rb.entity_tag]
         if ra.normalized_magnitude is None:
             fam_a = _string_family(ra.raw_value)
-            strict = [rb for rb in strict if _string_family(rb.raw_value) == fam_a]
+            strict = [
+                rb for rb in strict
+                if _family_compatible(_string_family(rb.raw_value), fam_a)
+            ]
         if strict:
             return strict
         # v2.8.4 — relaxed fallback. Same page + same name; ignore tag.
         # Keep the family filter for string-valued params (e.g. fuse
         # designation families must still match — different fuse classes
         # are not interchangeable even when tags differ).
+        # v2.8.5 — ``_family_compatible`` treats ``_NO_FAMILY`` as
+        # unconstrained so Fault-Current-style raw strings still pool.
         if ra.normalized_magnitude is None:
             fam_a = _string_family(ra.raw_value)
-            return [rb for rb in same_page if _string_family(rb.raw_value) == fam_a]
+            return [
+                rb for rb in same_page
+                if _family_compatible(_string_family(rb.raw_value), fam_a)
+            ]
         return same_page
 
     out: list[AlignedPair] = []

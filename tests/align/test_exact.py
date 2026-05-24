@@ -297,3 +297,46 @@ def test_native_distinct_y_pairing_unaffected_by_degeneracy_gate() -> None:
     assert by_y[0].a.raw_value == "1000 kVA" and by_y[0].b.raw_value == "100 kVA"
     assert by_y[0].value_equivalent is False  # real positional mismatch surfaces
     assert by_y[1].value_equivalent is True
+
+
+def test_string_family_no_prefix_does_not_block_pairing() -> None:
+    """v2.8.5 — Fault Current raw values like '20,000A RMS Sym' have no
+    fuse-style alphabetic prefix. The relaxed-pool family filter was
+    erroneously falling back to full-string equality, blocking pairs
+    when the very thing being compared (the value) differed.
+
+    Both records here are string-valued (no Pint magnitude), same page,
+    same name, different tags. The pair MUST surface so the detector
+    sees the 20kA vs 200kA mismatch."""
+    a = [_p(
+        "Fault Current", "A", "20,000A RMS Sym",
+        mag=None, page=2, y=100, entity_tag="Fault X, 20,000A RMS Sym",
+    )]
+    b = [_p(
+        "Fault Current", "B", "200,000A RMS Sym",
+        mag=None, page=2, y=100, entity_tag="Fault X",
+    )]
+    pairs = align_exact(a, b)
+    assert len(pairs) == 1
+    assert pairs[0].a.raw_value == "20,000A RMS Sym"
+    assert pairs[0].b.raw_value == "200,000A RMS Sym"
+    assert pairs[0].value_equivalent is False  # different magnitudes
+
+
+def test_string_family_still_blocks_incompatible_fuse_classes() -> None:
+    """v2.8.5 — family filter must remain strict when BOTH sides do have
+    recognizable alphabetic-prefix families. LPS-RK vs LPN-RK fuses are
+    not interchangeable; the relaxed pool must not bridge across them."""
+    a = [_p(
+        "Fuse Designation", "A", "LPS-RK-200SP",
+        mag=None, page=3, y=100, entity_tag="A",
+    )]
+    b = [_p(
+        "Fuse Designation", "B", "LPN-RK-500SP",
+        mag=None, page=3, y=100, entity_tag="B",
+    )]
+    pairs = align_exact(a, b)
+    assert pairs == [], (
+        "LPS-RK ≠ LPN-RK — different fuse families must not bridge "
+        "via the relaxed pool"
+    )
