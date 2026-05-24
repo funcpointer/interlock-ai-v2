@@ -119,10 +119,24 @@ def align_semantic(
             # BRIDGE un-grounded records — asymmetric tagging is normal
             # cross-document territory (one doc tags rows by section number,
             # the other has none).
+            #
+            # v2.8.3 — re-tightened for the cross-page case: when records
+            # come from different pages AND tagging is asymmetric, refuse.
+            # That's the bad-pair shape behind the doc_a p7 '150 KVA XFMR'
+            # ↔ doc_b p3 '1000KVA XFMR' false positive — the two records
+            # describe different physical equipment in unrelated table
+            # contexts, and the asymmetric-tag bridge has no anchor to
+            # trust. Same-page asymmetric stays allowed (likely shared
+            # table / callout context).
             if (
                 ra.entity_tag
                 and rb.entity_tag
                 and ra.entity_tag != rb.entity_tag
+            ):
+                continue
+            if (
+                ra.page != rb.page
+                and (bool(ra.entity_tag) != bool(rb.entity_tag))
             ):
                 continue
             # Reject dimensionally incompatible candidates outright

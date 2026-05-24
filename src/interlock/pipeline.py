@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 def _log_record_tally(
     side: str, doc_id: str, records: list[ParameterRecord],
 ) -> None:
-    """DEBUG-only: per-(parameter, page, lane) tally of extracted records.
+    """INFO-level: per-(parameter, page, lane) tally of extracted records.
 
     Output shape (one line per parameter)::
 
@@ -56,9 +56,29 @@ def _log_record_tally(
             f"{(' (' + r.entity_tag + ')') if r.entity_tag else ''}"
             for r in recs
         )
-        logger.debug(
+        logger.info(
             "records %s %s %r: %d  %s",
             side, doc_id, name, len(recs), details,
+        )
+
+
+def _log_surfaced_flags(flags: list[Flag]) -> None:
+    """INFO-level: dump every surfaced flag with full pair detail.
+    Easier triage than scrolling through the UI for "why did this
+    flag surface?"."""
+    for f in flags:
+        a_tag = getattr(f.a_record, "entity_tag", "") or "—"
+        b_tag = getattr(f.b_record, "entity_tag", "") or "—"
+        a_lane = getattr(f.a_record, "extraction_lane", "regex")
+        b_lane = getattr(f.b_record, "extraction_lane", "regex")
+        logger.info(
+            "FLAG %s sev=%s conf=%.2f dev=%.3f%% "
+            "A=[%s p%d %s tag=%s] B=[%s p%d %s tag=%s] rule=%s",
+            f.parameter, f.severity, f.confidence,
+            (f.deviation_pct or 0.0) * 100,
+            a_lane, f.a_record.page, f.a_record.raw_value, a_tag,
+            b_lane, f.b_record.page, f.b_record.raw_value, b_tag,
+            f.authority_rule,
         )
 
 
@@ -341,11 +361,11 @@ def review_two_documents_full(
     pa = dedup_same_doc_records(pa)
     pb = dedup_same_doc_records(pb)
 
-    # v2.8.1 — per-doc per-parameter tally at DEBUG so triage can see
-    # which params extracted from each doc and on which pages.
-    if logger.isEnabledFor(logging.DEBUG):
-        _log_record_tally("A", doc_a_id, pa)
-        _log_record_tally("B", doc_b_id, pb)
+    # v2.8.3 — per-doc per-parameter tally promoted to INFO. Triage
+    # needs to see which params extracted from each doc + on which pages
+    # without flipping to DEBUG (which floods with vision-claim DEBUG too).
+    _log_record_tally("A", doc_a_id, pa)
+    _log_record_tally("B", doc_b_id, pb)
 
     # v2 Sprint 4.5: entity grounding. Runs AFTER Track 2 union-merge so
     # both Track 1 + Track 2 records get bound by the same detector pass.
@@ -482,6 +502,7 @@ def review_two_documents_full(
             doc_class_b.doc_class.value, doc_class_b.confidence,
         )
 
+    _log_surfaced_flags(flags)
     logger.info(
         "pipeline END flags=%d unpaired_a=%d unpaired_b=%d total %.1fs",
         len(flags), len(unpaired_a), len(unpaired_b),

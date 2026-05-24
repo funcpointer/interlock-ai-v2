@@ -20,9 +20,13 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
-load_dotenv()
+# Find .env even when streamlit was launched from a different cwd.
+# usecwd=True falls back to the current working directory if find_dotenv
+# can't walk up to one; override=True lets .env beat pre-set shell vars
+# (so editing INTERLOCK_LOG_LEVEL in .env actually takes effect).
+load_dotenv(find_dotenv(usecwd=True), override=True)
 
 # Streamlit Cloud secrets bridge: copy any st.secrets entries into os.environ
 # so downstream code (Voyage, Anthropic) finds them without conditional imports.

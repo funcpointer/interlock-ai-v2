@@ -12,9 +12,9 @@ def _p(name: str, doc: str) -> ParameterRecord:
     )
 
 
-def _p_tagged(name: str, doc: str, tag: str = "") -> ParameterRecord:
+def _p_tagged(name: str, doc: str, tag: str = "", page: int = 1) -> ParameterRecord:
     return ParameterRecord(
-        doc_id=doc, page=1, bbox=(0, 0, 100, 10), section=None,
+        doc_id=doc, page=page, bbox=(0, 0, 100, 10), section=None,
         span_text=name, name=name, raw_value="1 V",
         normalized_magnitude=1.0, normalized_unit="volt",
         entity_tag=tag,
@@ -118,3 +118,35 @@ def test_semantic_allows_pair_when_neither_tagged() -> None:
 
     pairs = align_semantic(a, b, embed_fn=fake_embed, threshold=0.5)
     assert len(pairs) == 1
+
+
+def test_semantic_refuses_cross_page_asymmetric_tag() -> None:
+    """v2.8.3 — when records cross pages AND tagging is asymmetric, refuse.
+    That's the bad-pair shape behind the doc_a p7 '150 KVA XFMR' ↔
+    doc_b p3 '1000KVA XFMR' false positive: same parameter name but
+    different physical equipment in unrelated table contexts."""
+    a = [_p_tagged("Param", "A", tag="32", page=7)]
+    b = [_p_tagged("Param", "B", tag="", page=3)]
+
+    def fake_embed(texts: list[str]) -> dict[str, list[float]]:
+        return {"Param": [1.0, 0.0]}
+
+    pairs = align_semantic(a, b, embed_fn=fake_embed, threshold=0.5, same_page_only=False)
+    assert pairs == [], (
+        "cross-page asymmetric-tag pair must be refused"
+    )
+
+
+def test_semantic_allows_same_page_asymmetric_tag() -> None:
+    """Same-page asymmetric stays allowed — shared table / callout
+    context is the legitimate use case for the asymmetric bridge."""
+    a = [_p_tagged("Param", "A", tag="XFMR-001", page=3)]
+    b = [_p_tagged("Param", "B", tag="", page=3)]
+
+    def fake_embed(texts: list[str]) -> dict[str, list[float]]:
+        return {"Param": [1.0, 0.0]}
+
+    pairs = align_semantic(a, b, embed_fn=fake_embed, threshold=0.5, same_page_only=False)
+    assert len(pairs) == 1, (
+        "same-page asymmetric-tag pair must still bridge"
+    )
