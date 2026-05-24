@@ -79,6 +79,7 @@ def review_two_documents_full(
     use_entity_grounding: bool = True,     # v2.4: new, default True
     project_id: str | None = None,         # v2 Sprint 5a — clause-registry project override
     use_vision_lane: bool = True,          # v2 Sprint 8 — vision lane on diagram pages
+    vision_progress_cb: Callable[[int, int, int], None] | None = None,  # (done, total, page)
 ) -> ReviewResult:
     """Run end-to-end review.
 
@@ -167,28 +168,54 @@ def review_two_documents_full(
         from interlock.llm_pipeline.vision_extract import vision_extract_page
         _stage("vision_extract", "start")
 
-        def _vision_records_for_doc(pdf_path: str, doc_id: str) -> list[ParameterRecord]:
+        def _page_count(path: str) -> int:
             try:
-                doc = fitz.open(pdf_path)
-                n_pages = doc.page_count
-                doc.close()
+                d = fitz.open(path)
+                n = int(d.page_count)
+                d.close()
+                return n
             except Exception:
-                return []
-            out: list[ParameterRecord] = []
-            for p in range(1, n_pages + 1):
-                try:
-                    if classify_page_structure(pdf_path, p) != "diagram":
-                        continue
-                    out.extend(vision_extract_page(pdf_path, p, doc_id=doc_id))
-                except Exception:
-                    continue
-            return out
+                return 0
 
+        # Pre-pass: count diagram pages across A + B (classifier is
+        # diskcached, so this is free on the second call inside the loop).
+        diagram_pages_a: list[int] = []
+        diagram_pages_b: list[int] = []
         try:
-            pa = pa + _vision_records_for_doc(pdf_a, doc_a_id)
-            pb = pb + _vision_records_for_doc(pdf_b, doc_b_id)
+            for p in range(1, _page_count(pdf_a) + 1):
+                if classify_page_structure(pdf_a, p) == "diagram":
+                    diagram_pages_a.append(p)
+            for p in range(1, _page_count(pdf_b) + 1):
+                if classify_page_structure(pdf_b, p) == "diagram":
+                    diagram_pages_b.append(p)
         except Exception:
-            pass  # graceful fallback
+            pass
+
+        total_pages = len(diagram_pages_a) + len(diagram_pages_b)
+        done = 0
+
+        def _emit(page: int) -> None:
+            if vision_progress_cb is not None:
+                try:
+                    vision_progress_cb(done, total_pages, page)
+                except Exception:
+                    pass
+
+        for p in diagram_pages_a:
+            try:
+                pa = pa + vision_extract_page(pdf_a, p, doc_id=doc_a_id)
+            except Exception:
+                pass
+            done += 1
+            _emit(p)
+        for p in diagram_pages_b:
+            try:
+                pb = pb + vision_extract_page(pdf_b, p, doc_id=doc_b_id)
+            except Exception:
+                pass
+            done += 1
+            _emit(p)
+
         _stage("vision_extract", "done")
 
     # v2 Sprint 2: Track 2 LLM extraction (opt-in via use_llm_extraction).
@@ -335,6 +362,7 @@ def review_two_documents(
     use_entity_grounding: bool = True,     # v2.4: new, default True
     project_id: str | None = None,         # v2 Sprint 5a — clause-registry project override
     use_vision_lane: bool = True,          # v2 Sprint 8 — vision lane on diagram pages
+    vision_progress_cb: Callable[[int, int, int], None] | None = None,  # (done, total, page)
 ) -> list[Flag]:
     """Back-compat shim: returns only the flag list.
 
@@ -363,4 +391,5 @@ def review_two_documents(
         use_entity_grounding=use_entity_grounding,
         project_id=project_id,
         use_vision_lane=use_vision_lane,
+        vision_progress_cb=vision_progress_cb,
     ).flags

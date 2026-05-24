@@ -590,6 +590,7 @@ if run:
 
             stage_starts: dict[str, float] = {}
             ocr_bar_holder: dict[str, Any] = {}
+            vision_bar_holder: dict[str, Any] = {}
 
             def _stage_cb(stage_id: str, state: str) -> None:
                 ph = stage_placeholders.get(stage_id)
@@ -602,6 +603,40 @@ if run:
                 elif state == "done":
                     dt = time.time() - stage_starts.get(stage_id, time.time())
                     ph.markdown(f"✅ {label} · {dt:.1f}s")
+
+            def _vision_cb(done: int, total: int, page: int) -> None:
+                # v2 Sprint 8 — per-page progress bar for vision lane.
+                # Lazy-create row so it never appears when there are no
+                # diagram pages to process (total == 0).
+                if total <= 0:
+                    return
+                # Hide the static '⏳ AI vision extraction on diagram
+                # pages…' stage row once the bar is showing the same info.
+                stage_ph = stage_placeholders.get("vision_extract")
+                if stage_ph is not None and "stage_hidden" not in vision_bar_holder:
+                    stage_ph.empty()
+                    vision_bar_holder["stage_hidden"] = True
+                if "bar" not in vision_bar_holder:
+                    vision_bar_holder["label"] = status.empty()
+                    vision_bar_holder["label"].markdown(
+                        "⏳ **AI vision extraction on diagram pages "
+                        "(Claude Sonnet 4.5, cached)**"
+                    )
+                    vision_bar_holder["bar"] = st.progress(
+                        0.0, text="Vision: starting…",
+                    )
+                    vision_bar_holder["start"] = time.time()
+                ratio = done / max(total, 1)
+                vision_bar_holder["bar"].progress(
+                    min(ratio, 1.0),
+                    text=f"Vision: {done}/{total} pages complete (last: page {page})",
+                )
+                if done >= total:
+                    dt = time.time() - vision_bar_holder["start"]
+                    vision_bar_holder["label"].markdown(
+                        f"✅ AI vision extraction on diagram pages · "
+                        f"{total} page(s) · {dt:.1f}s"
+                    )
 
             def _ocr_cb(done: int, total: int, page: int) -> None:
                 # Lazy-create OCR row + bar so it never appears when no
@@ -641,6 +676,7 @@ if run:
                 use_entity_grounding=use_entity_grounding,
                 project_id=project_id,
                 use_vision_lane=use_vision_lane,
+                vision_progress_cb=_vision_cb,
             )
             flags = review_result.flags
             status.update(
